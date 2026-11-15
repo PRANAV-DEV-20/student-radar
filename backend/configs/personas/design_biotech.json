@@ -1,0 +1,40 @@
+{
+  "persona_id": "design_biotech",
+  "label": "Biotech, Healthcare & Industrial Design",
+  "description": "Computational biology, molecular design, biomolecular informatics, spatial ergonomics, medical devices, and accessible UX.",
+  "target_roles": [
+    "Bioinformatics Engineer",
+    "Hardware Industrial Designer",
+    "Clinical AI Researcher",
+    "Computational Biologist",
+    "Interaction Architect"
+  ],
+  "trusted_portals": [
+    "ncbi.nlm.nih.gov",
+    "rcsb.org",
+    "biorxiv.org",
+    "fda.gov",
+    "nature.com"
+  ],
+  "evaluation_rubric": [
+    "Biological/Clinical Plausibility & Benchmarks",
+    "Ergonomic Usability & Accessibility",
+    "Safety Constraints & Regulatory Pathway"
+  ],
+  "radar_query_templates": [
+    "biotech incubator grant 2026",
+    "computational biology challenge",
+    "healthcare innovation prize",
+    "medical device student fellowship"
+  ],
+  "recommended_tags": [
+    "Bioinformatics",
+    "Molecular Docking",
+    "AlphaFold",
+    "Medical Devices",
+    "Industrial Design",
+    "Clinical AI",
+    "Genomics"
+  ]
+}
+

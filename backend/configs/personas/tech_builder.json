@@ -1,0 +1,40 @@
+{
+  "persona_id": "tech_builder",
+  "label": "Engineering & AI Systems",
+  "description": "Autonomous software, distributed systems, robotics, AI agents, and foundational hardware architectures.",
+  "target_roles": [
+    "Founding Engineer",
+    "Systems Architect",
+    "ML Research Scientist",
+    "Robotics Engineer",
+    "Full-Stack Generalist"
+  ],
+  "trusted_portals": [
+    "github.com",
+    "arxiv.org",
+    "huggingface.co",
+    "devpost.com",
+    "ycombinator.com"
+  ],
+  "evaluation_rubric": [
+    "Algorithmic Novelty & Latency Bounds",
+    "Architectural Scalability & Fault Tolerance",
+    "Reproducibility & Open Source Artifact Quality"
+  ],
+  "radar_query_templates": [
+    "AI hackathon deadline 2026",
+    "systems engineering fellowship grant",
+    "open source software builder grant",
+    "robotics challenge prize pool"
+  ],
+  "recommended_tags": [
+    "Rust",
+    "PyTorch",
+    "Distributed Systems",
+    "Autonomous Agents",
+    "FastAPI",
+    "Next.js",
+    "Embedded Systems"
+  ]
+}
+

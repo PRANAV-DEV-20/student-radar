@@ -1,0 +1,40 @@
+{
+  "persona_id": "business_finance",
+  "label": "Finance, Quantitative & Venture",
+  "description": "Algorithmic trading, DeFi liquidity modeling, automated risk sentinels, supply chain tokenization, and B2B SaaS economics.",
+  "target_roles": [
+    "Quantitative Analyst",
+    "Product Strategist",
+    "Venture Analyst",
+    "Fintech Operations Lead",
+    "Tokenomics Designer"
+  ],
+  "trusted_portals": [
+    "sec.gov",
+    "bloomberg.com",
+    "crunchbase.com",
+    "defillama.com",
+    "pitchbook.com"
+  ],
+  "evaluation_rubric": [
+    "Unit Economics & Margin Defensibility",
+    "Risk-Adjusted Return & Capital Efficiency",
+    "Market Whitespace & Moat Structure"
+  ],
+  "radar_query_templates": [
+    "fintech hackathon cash prize 2026",
+    "venture capital student fellowship",
+    "algorithmic trading competition grant",
+    "blockchain incubator application"
+  ],
+  "recommended_tags": [
+    "Fintech",
+    "Quant Trading",
+    "DeFi",
+    "Venture Capital",
+    "Risk Modeling",
+    "B2B SaaS",
+    "Market Microstructure"
+  ]
+}
+

@@ -1,0 +1,39 @@
+{
+  "persona_id": "policy_law",
+  "label": "Law, Governance & Public Policy",
+  "description": "Regulatory technology, AI safety governance, statutory analysis, algorithmic antitrust, and civic tech policy frameworks.",
+  "target_roles": [
+    "Policy Analyst",
+    "Legal Technologist",
+    "Civic Tech Strategist",
+    "Governance Researcher",
+    "Compliance Architect"
+  ],
+  "trusted_portals": [
+    "regulations.gov",
+    "law.cornell.edu",
+    "ssrn.com",
+    "eff.org",
+    "brookings.edu"
+  ],
+  "evaluation_rubric": [
+    "Statutory Precedent & Legal Grounding",
+    "Administrative Viability & Stakeholder Impact",
+    "Constitutional & Privacy Safeguards"
+  ],
+  "radar_query_templates": [
+    "AI governance policy fellowship 2026",
+    "civic tech hackathon legal",
+    "public interest tech grant deadline",
+    "antitrust and digital markets competition"
+  ],
+  "recommended_tags": [
+    "Legal Tech",
+    "Regulatory Sandboxes",
+    "AI Safety",
+    "Civic Infrastructure",
+    "Digital Rights",
+    "Statutory NLP"
+  ]
+}
+
