@@ -45,12 +45,16 @@ services:
       redis:
         condition: service_healthy
     environment:
+      APP_ENV: ${APP_ENV:-development}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-radar_admin}:${POSTGRES_PASSWORD:-radar_secret_pass}@postgres:5432/${POSTGRES_DB:-student_radar_db}
       SYNC_DATABASE_URL: postgresql://${POSTGRES_USER:-radar_admin}:${POSTGRES_PASSWORD:-radar_secret_pass}@postgres:5432/${POSTGRES_DB:-student_radar_db}
       REDIS_URL: redis://redis:6379/0
       GEMINI_API_KEY: ${GEMINI_API_KEY}
-      JWT_SECRET: ${JWT_SECRET:-super_secret_jwt_key_for_development_purposes_only}
+      TAVILY_API_KEY: ${TAVILY_API_KEY}
+      EXA_API_KEY: ${EXA_API_KEY}
+      JWT_SECRET: ${JWT_SECRET:-super_secret_jwt_key_for_development_purposes_only_change_in_production}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      ENABLE_CELERY_DISPATCH: ${ENABLE_CELERY_DISPATCH:-false}
     ports:
       - "8000:8000"
     volumes:
@@ -69,10 +73,14 @@ services:
       redis:
         condition: service_healthy
     environment:
+      APP_ENV: ${APP_ENV:-development}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-radar_admin}:${POSTGRES_PASSWORD:-radar_secret_pass}@postgres:5432/${POSTGRES_DB:-student_radar_db}
       SYNC_DATABASE_URL: postgresql://${POSTGRES_USER:-radar_admin}:${POSTGRES_PASSWORD:-radar_secret_pass}@postgres:5432/${POSTGRES_DB:-student_radar_db}
       REDIS_URL: redis://redis:6379/0
       GEMINI_API_KEY: ${GEMINI_API_KEY}
+      TAVILY_API_KEY: ${TAVILY_API_KEY}
+      EXA_API_KEY: ${EXA_API_KEY}
+      ENABLE_CELERY_DISPATCH: ${ENABLE_CELERY_DISPATCH:-false}
     volumes:
       - ./backend:/app
 
@@ -89,7 +97,14 @@ services:
       redis:
         condition: service_healthy
     environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-radar_admin}:${POSTGRES_PASSWORD:-radar_secret_pass}@postgres:5432/${POSTGRES_DB:-student_radar_db}
+      SYNC_DATABASE_URL: postgresql://${POSTGRES_USER:-radar_admin}:${POSTGRES_PASSWORD:-radar_secret_pass}@postgres:5432/${POSTGRES_DB:-student_radar_db}
       REDIS_URL: redis://redis:6379/0
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      TAVILY_API_KEY: ${TAVILY_API_KEY}
+      EXA_API_KEY: ${EXA_API_KEY}
+      ENABLE_CELERY_DISPATCH: ${ENABLE_CELERY_DISPATCH:-false}
     volumes:
       - ./backend:/app
 

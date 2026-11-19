@@ -41,7 +41,7 @@ function AuthContent() {
       </div>
 
       <h2 className="text-xl font-bold text-white mb-2">
-        Unlock Full Access & 50⚡ Credits
+        Unlock Full Access & 30⚡ Credits
       </h2>
       <p className="text-xs text-gray-400 mb-6 leading-relaxed">
         Automatically converts your temporary guest session into an authenticated account with persistent ownership and daily opportunity briefing alerts.

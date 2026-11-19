@@ -16,4 +16,18 @@ class PRAsset(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     dossier = relationship("ProjectDossier", back_populates="pr_assets")
+    reach_events = relationship("PRReachEvent", back_populates="pr_asset", cascade="all, delete-orphan")
+
+    # Canonical product-schema aliases.
+    @property
+    def platform(self) -> str:
+        return self.asset_type
+
+    @property
+    def structured_payload(self):
+        return self.content_json
+
+    @property
+    def launch_card_url(self):
+        return self.og_image_url
 

@@ -8,9 +8,11 @@ from datetime import datetime, timezone, timedelta
 # Add backend directory to sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from app.core.config import settings
 from app.core.database import Base
+from app.core.security import get_password_hash
 from app.models.user import User
 from app.models.dossier import ProjectDossier
 from app.models.opportunity import Opportunity
@@ -767,57 +769,199 @@ SAMPLE_OPPORTUNITIES = [
     }
 ]
 
+SAMPLE_USERS = [
+    {
+        "email": "aarav@studentradar.dev",
+        "full_name": "Aarav Mehta",
+        "campus_or_org": "IIT Bombay",
+        "city": "Mumbai",
+        "active_persona_id": "tech_builder",
+        "verified_skills": ["Rust", "ROS 2", "Embedded Systems", "LoRaWAN", "PyTorch", "C++", "FastAPI"],
+    },
+    {
+        "email": "meera@studentradar.dev",
+        "full_name": "Meera Iyer",
+        "campus_or_org": "NLSIU Bengaluru",
+        "city": "Bengaluru",
+        "active_persona_id": "policy_law",
+        "verified_skills": ["Policy Analysis", "Statutory Research", "AI Governance", "Civic Tech", "Data Privacy"],
+    },
+    {
+        "email": "rohan@studentradar.dev",
+        "full_name": "Rohan Kapoor",
+        "campus_or_org": "IIM Ahmedabad",
+        "city": "Ahmedabad",
+        "active_persona_id": "business_finance",
+        "verified_skills": ["Quant Finance", "Market Microstructure", "Python", "TimescaleDB", "DeFi", "Venture Scouting"],
+    },
+    {
+        "email": "isha@studentradar.dev",
+        "full_name": "Isha Nair",
+        "campus_or_org": "Srishti Institute of Design",
+        "city": "Pune",
+        "active_persona_id": "design_biotech",
+        "verified_skills": ["Bioinformatics", "PyTorch", "RDKit", "Computational Biology", "Assistive Tech", "Molecular Dynamics"],
+    },
+]
+
+_STAGES = ["Prototype", "MVP", "Research", "Idea"]
+
+
 async def seed():
     print(f"Connecting to database: {settings.DATABASE_URL}")
     engine = create_async_engine(settings.DATABASE_URL, echo=False)
     async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
-    async with engine.begin() as conn:
+    # PostgreSQL aborts the current transaction after any error, so each
+    # extension gets its own transaction.
+    for extension in ("uuid-ossp", "vector"):
         try:
-            await conn.execute("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";")
-            await conn.execute("CREATE EXTENSION IF NOT EXISTS \"vector\";")
+            async with engine.begin() as conn:
+                if extension == "vector":
+                    # Do not re-create the extension when a staged pgvector DLL
+                    # already provides the type; that can load two copies of
+                    # the shared library in one backend.
+                    type_exists = await conn.scalar(
+                        text("SELECT 1 FROM pg_type WHERE typname = 'vector'")
+                    )
+                    if type_exists:
+                        continue
+                await conn.execute(text(f'CREATE EXTENSION IF NOT EXISTS "{extension}";'))
         except Exception as e:
-            print(f"Extension note: {e}")
+            print(f"Extension note ({extension}): {e}")
+
+    async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    async with async_session() as session:
-        # Check existing dossiers
-        from sqlalchemy import select, func
-        count_res = await session.execute(select(func.count(ProjectDossier.id)))
-        existing_count = count_res.scalar() or 0
-        if existing_count >= 25:
-            print(f"Database already populated with {existing_count} dossiers. Seeding skipped.")
-            return
+    now = datetime.now(timezone.utc)
+    demo_password = get_password_hash("DemoPass123!")
 
+    async with async_session() as session:
+        # ------------------------------------------------------------------
+        # Demo accounts (required for co-builder matchmaking + review flows)
+        # ------------------------------------------------------------------
+        users_by_persona = {}
+        for item in SAMPLE_USERS:
+            result = await session.execute(select(User).where(User.email == item["email"]))
+            user = result.scalars().first()
+            if user is None:
+                user = User(
+                    email=item["email"],
+                    hashed_password=demo_password,
+                    full_name=item["full_name"],
+                    campus_or_org=item["campus_or_org"],
+                    city=item["city"],
+                    active_persona_id=item["active_persona_id"],
+                    verified_skills=item["verified_skills"],
+                    credits_balance=settings.SIGNUP_CREDITS,
+                )
+                session.add(user)
+                await session.flush()
+            else:
+                if not user.verified_skills:
+                    user.verified_skills = item["verified_skills"]
+                if not user.city:
+                    user.city = item["city"]
+                if not user.active_persona_id:
+                    user.active_persona_id = item["active_persona_id"]
+
+            if not user.skills_embedding:
+                user.skills_embedding = await gemini_service.generate_embedding(
+                    " ".join(item["verified_skills"])
+                )
+            users_by_persona[item["active_persona_id"]] = user
+
+        await session.flush()
+
+        # ------------------------------------------------------------------
+        # Proof-of-Work dossiers (idempotent by title)
+        # ------------------------------------------------------------------
         print(f"Seeding {len(SAMPLE_DOSSIERS)} cross-domain Proof-of-Work dossiers...")
-        for item in SAMPLE_DOSSIERS:
+        dossiers_inserted = 0
+        dossiers_skipped = 0
+        for index, item in enumerate(SAMPLE_DOSSIERS):
+            existing = await session.execute(
+                select(ProjectDossier.id).where(ProjectDossier.title == item["title"])
+            )
+            if existing.scalar_one_or_none() is not None:
+                dossiers_skipped += 1
+                continue
+
             slug = f"{item['title'].lower().replace(' ', '-')[:40]}-{uuid.uuid4().hex[:6]}"
             embed_text = f"{item['title']}: {item['tagline']} {item['problem_statement']}"
             embedding = await gemini_service.generate_embedding(embed_text)
 
+            roles = item.get("missing_roles") or []
+            role_text = " || ".join(
+                str(role.get("role", "")) for role in roles if isinstance(role, dict)
+            ) or "Open co-builder with complementary verified skills"
+            missing_roles_embedding = await gemini_service.generate_embedding(role_text)
+
+            whitespace = item.get("whitespace_analysis") or {}
+            trend_cache = {
+                "market_gap": whitespace.get("market_gap", ""),
+                "top_voices": whitespace.get("top_voices", []),
+                "last_scouted": now.isoformat(),
+                "source": "seed",
+            }
+
+            owner = users_by_persona.get(item["domain_persona"])
+            boosted = bool(item.get("boosted", False))
+
             dossier = ProjectDossier(
+                user_id=owner.id if owner else None,
                 slug=slug,
                 title=item["title"],
                 tagline=item["tagline"],
                 domain_persona=item["domain_persona"],
+                stage=item.get("stage") or _STAGES[index % len(_STAGES)],
                 problem_statement=item["problem_statement"],
                 solution_breakdown=item["solution_breakdown"],
                 tech_stack=item["tech_stack"],
                 key_metrics=item["key_metrics"],
-                whitespace_analysis=item["whitespace_analysis"],
-                missing_roles=item["missing_roles"],
+                whitespace_analysis=item.get("whitespace_analysis"),
+                trend_radar_cache=trend_cache,
+                missing_roles=roles,
                 external_links=item.get("external_links", {}),
                 verified_status=item.get("verified_status", True),
-                boosted=item.get("boosted", False),
-                embedding=embedding
+                boosted=boosted,
+                boosted_until=(
+                    now + timedelta(hours=settings.BOOST_DURATION_HOURS) if boosted else None
+                ),
+                embedding=embedding,
+                missing_roles_embedding=missing_roles_embedding,
             )
             session.add(dossier)
+            dossiers_inserted += 1
 
+        # ------------------------------------------------------------------
+        # Event Radar opportunities (idempotent by fingerprint / URL)
+        # ------------------------------------------------------------------
         print(f"Seeding {len(SAMPLE_OPPORTUNITIES)} Event Radar opportunities...")
+        opportunities_inserted = 0
+        opportunities_skipped = 0
         for opp in SAMPLE_OPPORTUNITIES:
-            fingerprint = dedup_service.compute_sha256_fingerprint(opp["canonical_source_url"], opp["title"])
+            fingerprint = dedup_service.compute_sha256_fingerprint(
+                opp["canonical_source_url"], opp["title"]
+            )
+            existing = await session.execute(
+                select(Opportunity.id).where(
+                    or_(
+                        Opportunity.sha256_hash == fingerprint,
+                        Opportunity.canonical_source_url == opp["canonical_source_url"],
+                    )
+                )
+            )
+            if existing.scalar_one_or_none() is not None:
+                opportunities_skipped += 1
+                continue
+
             opp_text = f"{opp['title']}: {opp['description']}"
             embedding = await gemini_service.generate_embedding(opp_text)
+
+            city = opp.get("city")
+            if not city and opp.get("location_type") == "in_person":
+                city = settings.DEFAULT_CITY
 
             opportunity = Opportunity(
                 title=opp["title"],
@@ -825,18 +969,37 @@ async def seed():
                 canonical_source_url=opp["canonical_source_url"],
                 host_organization=opp["host_organization"],
                 deadline=opp["deadline"],
+                city=city,
+                event_date=opp["deadline"].date(),
                 description=opp["description"],
                 tags=opp["tags"],
                 domain_personas=opp["domain_personas"],
                 location_type=opp["location_type"],
                 reward_pool=opp["reward_pool"],
+                decision_metadata={"source": "seed"},
                 sha256_hash=fingerprint,
-                embedding=embedding
+                embedding=embedding,
             )
             session.add(opportunity)
+            opportunities_inserted += 1
 
         await session.commit()
-        print("Database successfully seeded with 25 cross-domain dossiers and event opportunities!")
+
+        dossier_count = (
+            await session.execute(select(func.count(ProjectDossier.id)))
+        ).scalar() or 0
+        opportunity_count = (
+            await session.execute(select(func.count(Opportunity.id)))
+        ).scalar() or 0
+
+    await engine.dispose()
+    print(
+        "Seed complete: "
+        f"{dossiers_inserted} dossiers inserted ({dossiers_skipped} skipped), "
+        f"{opportunities_inserted} opportunities inserted ({opportunities_skipped} skipped). "
+        f"Totals: {dossier_count} dossiers, {opportunity_count} opportunities."
+    )
+
 
 if __name__ == "__main__":
     asyncio.run(seed())

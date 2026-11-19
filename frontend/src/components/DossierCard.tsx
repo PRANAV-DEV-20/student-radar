@@ -1,8 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import Link from "next/navigation";
-import { ShieldCheck, Share2, Sparkles, ExternalLink, Check, Copy, ArrowRight, Code } from "lucide-react";
+import { ShieldCheck, Sparkles, ExternalLink, Check, Copy, ArrowRight, Code, Download, Cpu, Layers } from "lucide-react";
 
 interface DossierCardProps {
   dossier: any;
@@ -25,9 +24,21 @@ export function DossierCard({ dossier, onOpenPeerReview, onOpenPRStudio }: Dossi
   };
 
   const solution = dossier.solution_breakdown || {};
+
+  // Only render submitted/grounded facts. Template metrics and stacks are never
+  // invented as placeholders.
   const metrics = dossier.key_metrics || [];
   const stack = dossier.tech_stack || [];
   const links = dossier.external_links || {};
+
+  const algorithms = Array.isArray(solution.core_algorithms)
+    ? solution.core_algorithms.filter(Boolean)
+    : solution.core_algorithms
+      ? [solution.core_algorithms]
+      : [];
+
+  const infra = solution.hardware_or_infra || "Not specified in the submitted artifact.";
+  const architecture = solution.architecture || "Architecture not specified in the submitted artifact.";
 
   return (
     <div className="w-full rounded-2xl bg-editorial-paper border border-white/20 p-6 sm:p-8 shadow-2xl text-editorial-ink relative">
@@ -37,7 +48,10 @@ export function DossierCard({ dossier, onOpenPeerReview, onOpenPRStudio }: Dossi
           <span className="text-xs uppercase font-mono px-2.5 py-1 rounded bg-gray-100 border border-gray-300 font-semibold text-gray-700">
             {dossier.domain_persona?.replace("_", " ").toUpperCase() || "TECH BUILDER"}
           </span>
-          <span className="text-xs text-gray-500 font-mono">
+          <span className="text-xs font-mono px-2 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 font-semibold">
+            {dossier.stage || "Prototype"}
+          </span>
+          <span className="text-xs text-gray-400 font-mono hidden sm:inline">
             ID: {dossier.slug}
           </span>
         </div>
@@ -49,8 +63,9 @@ export function DossierCard({ dossier, onOpenPeerReview, onOpenPRStudio }: Dossi
               VERIFIED ARTIFACT
             </span>
           ) : (
-            <span className="text-xs text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full font-mono">
-              Unverified Link
+            <span className="text-xs text-gray-600 bg-gray-100 border border-gray-200 px-2.5 py-1 rounded-full font-mono flex items-center gap-1">
+              <Sparkles className="w-3.5 h-3.5 text-horizon-indigo" />
+              Synthesized PoW
             </span>
           )}
           <button
@@ -73,7 +88,7 @@ export function DossierCard({ dossier, onOpenPeerReview, onOpenPRStudio }: Dossi
         </p>
       </div>
 
-      {/* Quantitative Benchmarks Grid */}
+      {/* Quantitative Benchmarks Grid (submitted metrics only) */}
       {metrics.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
           {metrics.map((metric: any, i: number) => (
@@ -93,57 +108,56 @@ export function DossierCard({ dossier, onOpenPeerReview, onOpenPRStudio }: Dossi
       <div className="space-y-6 mb-8 text-sm leading-relaxed">
         {/* Problem Statement */}
         <div className="bg-white/80 p-5 rounded-xl border border-gray-200">
-          <h3 className="text-xs font-mono uppercase tracking-wider font-bold text-gray-500 mb-2">
+          <h3 className="text-xs font-mono uppercase tracking-wider font-bold text-gray-500 mb-2 flex items-center gap-1.5">
+            <Layers className="w-3.5 h-3.5 text-gray-400" />
             // Problem Statement & Vulnerability
           </h3>
-          <p className="text-gray-800">
+          <p className="text-gray-800 leading-relaxed">
             {dossier.problem_statement}
           </p>
         </div>
 
         {/* Architectural Breakdown */}
         <div className="bg-white/80 p-5 rounded-xl border border-gray-200 space-y-4">
-          <h3 className="text-xs font-mono uppercase tracking-wider font-bold text-gray-500">
-            // System Architecture & Execution
+          <h3 className="text-xs font-mono uppercase tracking-wider font-bold text-gray-500 flex items-center gap-1.5">
+            <Cpu className="w-3.5 h-3.5 text-gray-400" />
+            // System Architecture & Technical Execution
           </h3>
           
-          {solution.architecture && (
-            <div>
-              <span className="font-semibold text-gray-900 text-xs uppercase font-mono block">Architecture:</span>
-              <p className="text-gray-700 mt-0.5">{solution.architecture}</p>
-            </div>
-          )}
+          <div>
+            <span className="font-semibold text-gray-900 text-xs uppercase font-mono block">Architecture Blueprint:</span>
+            <p className="text-gray-700 mt-0.5 leading-relaxed">{architecture}</p>
+          </div>
 
-          {solution.core_algorithms && (
-            <div>
-              <span className="font-semibold text-gray-900 text-xs uppercase font-mono block">Core Algorithms:</span>
-              <ul className="list-disc list-inside text-gray-700 mt-1 space-y-0.5">
-                {Array.isArray(solution.core_algorithms) ? (
-                  solution.core_algorithms.map((alg: string, idx: number) => (
-                    <li key={idx} className="font-mono text-xs">{alg}</li>
-                  ))
-                ) : (
-                  <li className="font-mono text-xs">{solution.core_algorithms}</li>
-                )}
+          <div>
+            <span className="font-semibold text-gray-900 text-xs uppercase font-mono block">Core Algorithms & Methods:</span>
+            {algorithms.length > 0 ? (
+              <ul className="list-disc list-inside text-gray-700 mt-1 space-y-1">
+                {algorithms.map((alg: string, idx: number) => (
+                  <li key={idx} className="font-mono text-xs">{alg}</li>
+                ))}
               </ul>
-            </div>
-          )}
+            ) : (
+              <p className="text-gray-500 mt-1 font-mono text-xs">
+                Not specified in the submitted artifact.
+              </p>
+            )}
+          </div>
 
-          {solution.hardware_or_infra && (
-            <div>
-              <span className="font-semibold text-gray-900 text-xs uppercase font-mono block">Infrastructure / Hardware:</span>
-              <p className="text-gray-700 mt-0.5 font-mono text-xs">{solution.hardware_or_infra}</p>
-            </div>
-          )}
+          <div>
+            <span className="font-semibold text-gray-900 text-xs uppercase font-mono block">Infrastructure & Hardware:</span>
+            <p className="text-gray-700 mt-0.5 font-mono text-xs">{infra}</p>
+          </div>
         </div>
       </div>
 
-      {/* Tech Stack Chips */}
-      {stack.length > 0 && (
-        <div className="mb-8">
-          <span className="text-xs font-mono uppercase text-gray-500 block mb-2 font-bold">
-            Artifact Dependencies & Stack:
-          </span>
+      {/* Tech Stack Chips (submitted/grounded technologies only) */}
+      <div className="mb-8">
+        <span className="text-xs font-mono uppercase text-gray-500 block mb-2 font-bold flex items-center gap-1.5">
+          <Code className="w-3.5 h-3.5 text-gray-400" />
+          Artifact Dependencies & Technology Stack:
+        </span>
+        {stack.length > 0 ? (
           <div className="flex flex-wrap gap-2">
             {stack.map((item: string) => (
               <span key={item} className="text-xs font-mono bg-white border border-gray-300 text-gray-800 px-3 py-1 rounded-md shadow-2xs">
@@ -151,8 +165,12 @@ export function DossierCard({ dossier, onOpenPeerReview, onOpenPRStudio }: Dossi
               </span>
             ))}
           </div>
-        </div>
-      )}
+        ) : (
+          <p className="text-xs font-mono text-gray-500">
+            No technologies specified in the submitted artifact.
+          </p>
+        )}
+      </div>
 
       {/* Verified External Links */}
       {links.github && (
@@ -190,4 +208,3 @@ export function DossierCard({ dossier, onOpenPeerReview, onOpenPRStudio }: Dossi
     </div>
   );
 }
-

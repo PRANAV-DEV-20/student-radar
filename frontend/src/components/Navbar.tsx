@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Zap, ShieldCheck, Compass, Sparkles, UserCheck } from "lucide-react";
+import { Zap, ShieldCheck, Compass, Sparkles, UserCheck, LayoutDashboard } from "lucide-react";
 import { DOMAIN_PERSONAS } from "@/lib/constants";
 import { getAuthToken } from "@/lib/api";
 
@@ -15,7 +15,7 @@ interface NavbarProps {
 
 export function Navbar({ currentPersona = "tech_builder", onPersonaChange, onOpenAuthModal }: NavbarProps) {
   const pathname = usePathname();
-  const [credits, setCredits] = useState(50);
+  const [credits, setCredits] = useState(30);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   useEffect(() => {
@@ -55,6 +55,15 @@ export function Navbar({ currentPersona = "tech_builder", onPersonaChange, onOpe
             }`}
           >
             Studio
+          </Link>
+          <Link
+            href="/dashboard"
+            className={`px-3.5 py-1.5 text-xs font-medium rounded-full transition-all flex items-center gap-1 ${
+              pathname.startsWith("/dashboard") ? "bg-white/10 text-white shadow-inner" : "text-gray-400 hover:text-white"
+            }`}
+          >
+            <LayoutDashboard className="w-3.5 h-3.5 text-horizon-indigo" />
+            Dashboard
           </Link>
           <Link
             href="/dossier"
@@ -104,11 +113,13 @@ export function Navbar({ currentPersona = "tech_builder", onPersonaChange, onOpe
             </div>
           )}
 
-          {/* Visibility Credits (⚡) */}
-          <div className="flex items-center gap-1.5 bg-void-card border border-horizon-violet/30 px-3 py-1.5 rounded-full shadow-sm">
-            <Zap className="w-3.5 h-3.5 text-horizon-violet fill-horizon-violet" />
-            <span className="text-xs font-bold text-white font-mono">{credits}⚡</span>
-          </div>
+          {/* Visibility Credits (⚡) — hidden on the command center by design */}
+          {!pathname.startsWith("/dashboard") && (
+            <div className="flex items-center gap-1.5 bg-void-card border border-horizon-violet/30 px-3 py-1.5 rounded-full shadow-sm">
+              <Zap className="w-3.5 h-3.5 text-horizon-violet fill-horizon-violet" />
+              <span className="text-xs font-bold text-white font-mono">{credits}⚡</span>
+            </div>
+          )}
 
           {/* Auth Button */}
           <button

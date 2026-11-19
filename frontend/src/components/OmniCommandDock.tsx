@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Github, FileText, Sparkles, Loader2, Link as LinkIcon, Compass } from "lucide-react";
+import { ArrowRight, Github, FileText, Sparkles, Loader2, Link as LinkIcon, AlertCircle, CheckCircle2 } from "lucide-react";
 import { DOMAIN_PERSONAS, DEMO_PRESETS, DemoPreset } from "@/lib/constants";
 import { api } from "@/lib/api";
 
@@ -15,59 +15,113 @@ export function OmniCommandDock({ onIngestComplete }: OmniCommandDockProps) {
   const [content, setContent] = useState("");
   const [persona, setPersona] = useState("tech_builder");
   const [isLoading, setIsLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<"github" | "idea" | "pdf_text">("github");
+  const [generationStep, setGenerationStep] = useState("");
+  const [error, setError] = useState("");
+  const [activeTab, setActiveTab] = useState<"idea" | "github" | "pdf_text">("idea");
+
+  const handleContentChange = (val: string) => {
+    setContent(val);
+    setError("");
+    // Auto-detect GitHub URLs
+    if (/^https?:\/\/(?:www\.)?github\.com\//i.test(val.trim())) {
+      setActiveTab("github");
+    }
+  };
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!content.trim()) return;
+    const trimmed = content.trim();
+    if (!trimmed) {
+      setError("Please describe your project idea or paste a repository link.");
+      return;
+    }
 
+    setError("");
     setIsLoading(true);
+    setGenerationStep("Analyzing your concept & problem domain...");
+
     try {
+      // Step feedback animation
+      const timer1 = setTimeout(() => {
+        setGenerationStep("Synthesizing system architecture & stack...");
+      }, 700);
+
+      const timer2 = setTimeout(() => {
+        setGenerationStep("Inferring verified benchmarks & whitespace...");
+      }, 1400);
+
+      const looksLikeUrl = /^https?:\/\//i.test(trimmed);
+      const effectiveType = activeTab === "github" && !looksLikeUrl ? "idea" : activeTab;
+
       const dossier = await api.ingestArtifact({
-        input_type: activeTab,
-        raw_content: content.trim(),
+        input_type: effectiveType,
+        raw_content: trimmed,
         domain_persona: persona
       });
 
-      // Save active dossier in session storage
-      if (typeof window !== "undefined") {
-        sessionStorage.setItem("current_dossier", JSON.stringify(dossier));
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+
+      if (!dossier || !dossier.slug || !dossier.title) {
+        throw new Error("Could not synthesize dossier. Please try again.");
       }
 
-      if (onIngestComplete) {
-        onIngestComplete(dossier);
-      } else {
-        router.push(`/dossier?slug=${dossier.slug}`);
+      setGenerationStep("Dossier generated! Opening workspace...");
+
+      // Cache dossier in session & local storage
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("current_dossier", JSON.stringify(dossier));
+        localStorage.setItem("student_radar_last_dossier", JSON.stringify(dossier));
       }
+
+      setTimeout(() => {
+        if (onIngestComplete) {
+          onIngestComplete(dossier);
+        } else {
+          router.push(`/dossier?slug=${encodeURIComponent(dossier.slug)}`);
+        }
+      }, 500);
+
     } catch (err: any) {
       console.error("Ingestion error:", err);
-    } finally {
+      setError(err?.message || "Could not generate the dossier. Please try again.");
       setIsLoading(false);
     }
   };
 
   const handleSelectPreset = (preset: DemoPreset) => {
+    setError("");
     setContent(preset.rawContent);
     setPersona(preset.domain);
-    setActiveTab(preset.type);
+    setActiveTab(preset.type as any);
   };
 
   return (
     <div className="w-full max-w-3xl mx-auto flex flex-col gap-4">
       {/* Omni-Command Dock Surface */}
-      <div className="relative rounded-2xl bg-void-card/90 border border-void-border p-2 sm:p-3 shadow-2xl backdrop-blur-2xl transition-all focus-within:border-horizon-indigo/60 focus-within:ring-2 focus-within:ring-horizon-indigo/20">
+      <div className="relative rounded-2xl bg-void-card/90 border border-void-border p-3 sm:p-4 shadow-2xl backdrop-blur-2xl transition-all focus-within:border-horizon-indigo/60 focus-within:ring-2 focus-within:ring-horizon-indigo/20">
         
         {/* Glow ambient layer */}
         <div className="absolute -inset-0.5 bg-gradient-to-r from-horizon-indigo/20 to-horizon-violet/20 rounded-2xl blur-lg -z-10 opacity-75 group-hover:opacity-100 transition duration-1000" />
 
         {/* Input Mode Tabs & Persona selector */}
-        <div className="flex flex-wrap items-center justify-between gap-2 px-2 pb-2 border-b border-void-border/60">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-1 pb-3 border-b border-void-border/60">
           <div className="flex items-center gap-1 bg-void/60 p-1 rounded-lg border border-void-border/50 text-xs">
             <button
               type="button"
+              onClick={() => setActiveTab("idea")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all ${
+                activeTab === "idea" ? "bg-white/10 text-white font-medium shadow-inner" : "text-gray-400 hover:text-gray-200"
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-horizon-indigo" />
+              <span>Concept & Idea</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setActiveTab("github")}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-md transition-all ${
-                activeTab === "github" ? "bg-white/10 text-white font-medium" : "text-gray-400 hover:text-gray-200"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all ${
+                activeTab === "github" ? "bg-white/10 text-white font-medium shadow-inner" : "text-gray-400 hover:text-gray-200"
               }`}
             >
               <Github className="w-3.5 h-3.5" />
@@ -75,33 +129,23 @@ export function OmniCommandDock({ onIngestComplete }: OmniCommandDockProps) {
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab("idea")}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-md transition-all ${
-                activeTab === "idea" ? "bg-white/10 text-white font-medium" : "text-gray-400 hover:text-gray-200"
-              }`}
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Raw Concept</span>
-            </button>
-            <button
-              type="button"
               onClick={() => setActiveTab("pdf_text")}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-md transition-all ${
-                activeTab === "pdf_text" ? "bg-white/10 text-white font-medium" : "text-gray-400 hover:text-gray-200"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all ${
+                activeTab === "pdf_text" ? "bg-white/10 text-white font-medium shadow-inner" : "text-gray-400 hover:text-gray-200"
               }`}
             >
               <FileText className="w-3.5 h-3.5" />
-              <span>Paper / Abstract</span>
+              <span>Paper / PDF</span>
             </button>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-[11px] font-mono text-gray-500">Domain:</span>
+            <span className="text-[11px] font-mono text-gray-500">Domain Persona:</span>
             <select
               value={persona}
               onChange={(e) => setPersona(e.target.value)}
               aria-label="Select target domain persona"
-              className="bg-void/80 border border-void-border rounded-lg text-xs text-gray-200 px-2.5 py-1 focus:outline-none focus:border-horizon-indigo cursor-pointer"
+              className="bg-void/80 border border-void-border rounded-lg text-xs text-gray-200 px-2.5 py-1.5 focus:outline-none focus:border-horizon-indigo cursor-pointer"
             >
               {DOMAIN_PERSONAS.map((p) => (
                 <option key={p.id} value={p.id} className="bg-void-card text-white">
@@ -113,46 +157,64 @@ export function OmniCommandDock({ onIngestComplete }: OmniCommandDockProps) {
         </div>
 
         {/* Input Bar */}
-        <form onSubmit={handleSubmit} className="flex items-center gap-2 pt-2 px-2">
-          <div className="relative flex-1 flex items-center">
-            {activeTab === "github" ? (
-              <LinkIcon className="absolute left-3 w-4 h-4 text-gray-500" />
-            ) : (
-              <Sparkles className="absolute left-3 w-4 h-4 text-horizon-indigo" />
-            )}
-            <input
-              type="text"
+        <form onSubmit={handleSubmit} className="flex flex-col gap-3 pt-3 px-1">
+          <div className="relative w-full">
+            <textarea
               value={content}
-              onChange={(e) => setContent(e.target.value)}
+              onChange={(e) => handleContentChange(e.target.value)}
+              rows={activeTab === "github" ? 2 : 3}
               placeholder={
                 activeTab === "github"
                   ? "Paste repository URL (e.g. https://github.com/org/repo)..."
                   : activeTab === "idea"
-                  ? "Describe what you're building, core problem, and technical architecture..."
-                  : "Paste paper abstract or research text breakdown..."
+                  ? "Describe your project concept, problem statement, or technical vision (e.g., 'An AI interview coach with real-time speech feedback and behavioral rubrics for students')..."
+                  : "Paste your research paper abstract or technical concept..."
               }
-              className="w-full bg-transparent pl-10 pr-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none"
+              className="w-full bg-void/50 rounded-xl border border-void-border/80 p-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-horizon-indigo resize-none leading-relaxed font-sans"
             />
           </div>
 
-          <button
-            type="submit"
-            disabled={isLoading || !content.trim()}
-            className="flex items-center gap-2 bg-gradient-to-r from-horizon-indigo to-horizon-violet hover:from-indigo-600 hover:to-purple-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-lg transition-all active:scale-95 shrink-0"
-          >
-            {isLoading ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Extracting...</span>
-              </>
-            ) : (
-              <>
-                <span>Generate Dossier</span>
-                <ArrowRight className="w-4 h-4" />
-              </>
-            )}
-          </button>
+          {/* Action Row */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-[11px] text-gray-400 font-mono">
+              ⚡ Turns ideas into verified Dossiers + PR Kits in &lt; 2 seconds
+            </span>
+
+            <button
+              type="submit"
+              disabled={isLoading || !content.trim()}
+              className="flex items-center gap-2 bg-gradient-to-r from-horizon-indigo to-horizon-violet hover:from-indigo-600 hover:to-purple-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold px-5 py-2.5 rounded-xl shadow-lg transition-all active:scale-95"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>{generationStep || "Synthesizing..."}</span>
+                </>
+              ) : (
+                <>
+                  <span>Generate Proof-of-Work Dossier</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
+          </div>
         </form>
+
+        {/* Live Generation Progress Indicator */}
+        {isLoading && (
+          <div className="mt-3 p-2.5 rounded-xl bg-horizon-indigo/10 border border-horizon-indigo/30 flex items-center gap-2 text-xs text-indigo-300 font-mono animate-pulse">
+            <Sparkles className="w-4 h-4 text-horizon-indigo shrink-0" />
+            <span>{generationStep}</span>
+          </div>
+        )}
+
+        {/* Error notification */}
+        {error && (
+          <div className="mt-3 p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center gap-2 text-xs text-red-400">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
       </div>
 
       {/* 1-Tap Live Demo Presets */}
@@ -183,4 +245,3 @@ export function OmniCommandDock({ onIngestComplete }: OmniCommandDockProps) {
     </div>
   );
 }
-

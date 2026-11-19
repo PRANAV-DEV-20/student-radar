@@ -2,8 +2,10 @@ import React from "react";
 import type { Metadata } from "next";
 import { Navbar } from "@/components/Navbar";
 import { DossierCard } from "@/components/DossierCard";
-import { ShieldCheck, Share2, ArrowLeft, Github, Globe } from "lucide-react";
+import { DossierViewBeacon } from "@/components/DossierViewBeacon";
+import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
+import { synthesizeFallbackDossier, slugToFallbackContent } from "@/lib/heuristicDossier";
 
 interface PublicDossierProps {
   params: Promise<{ slug: string }>;
@@ -20,37 +22,15 @@ async function fetchDossierData(slug: string) {
     console.warn(`Public dossier fetch failed for ${slug}, using local fallback.`);
   }
 
-  // Realistic fallback
-  return {
-    id: "public-mock-id",
-    slug: slug,
-    title: "Autonomous Decentralized Drone Swarm Orchestrator",
-    tagline: "Mesh-based multi-agent coordination protocol operating in zero-GPS environments",
-    domain_persona: "tech_builder",
-    problem_statement: "Search and rescue operations fail when satellite navigation is degraded or jammed.",
-    solution_breakdown: {
-      architecture: "Decentralized consensus via Raft over sub-GHz LoRa mesh",
-      core_algorithms: ["Distributed Kalman Filter", "Dynamic Voronoi Partitioning"],
-      hardware_or_infra: "PX4 Autopilot with Raspberry Pi CM4 companion board"
-    },
-    tech_stack: ["Rust", "ROS 2", "Python", "LoRaWAN", "FastAPI"],
-    key_metrics: [
-      { label: "Convergence Latency", value: "12.4ms" },
-      { label: "Obstacle Avoidance F1", value: "0.984" },
-      { label: "Max Swarm Nodes", value: "32" }
-    ],
-    whitespace_analysis: {
-      market_gap: "Commercial swarms rely on centralized LTE basestations which collapse during wildfires.",
-      top_voices: ["@DrDroneAI", "ETH Robotics Lab", "Open Source Autopilot Foundation"]
-    },
-    missing_roles: [
-      { role: "Embedded Systems Engineer", reason: "Optimize LoRa packet serialization in C/Rust" },
-      { role: "Field Test Coordinator", reason: "Lead outdoor FAA Part 107 stress test flights" }
-    ],
-    external_links: { github: "https://github.com/student-radar/drone-swarm-mesh" },
-    verified_status: true,
-    created_at: new Date().toISOString()
-  };
+  // Derive the preview from the slug instead of showing an unrelated drone
+  // project. A real backend response will replace this as soon as it is
+  // available.
+  return synthesizeFallbackDossier(
+    slugToFallbackContent(slug),
+    "idea",
+    "tech_builder",
+    slug,
+  );
 }
 
 export async function generateMetadata({ params }: PublicDossierProps): Promise<Metadata> {
@@ -88,6 +68,8 @@ export default async function PublicDossierPage({ params }: PublicDossierProps) 
 
   return (
     <div className="relative min-h-screen bg-void text-white selection:bg-horizon-indigo selection:text-white">
+      <DossierViewBeacon slug={resolvedParams.slug} />
+
       {/* Top Ambient Glow */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1200px] h-[350px] bg-horizon-radial pointer-events-none -z-10" />
 

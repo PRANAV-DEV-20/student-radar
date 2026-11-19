@@ -10,10 +10,21 @@ class CreditTransaction(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    dossier_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("project_dossiers.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     amount = Column(Integer, nullable=False) # e.g. +10, -20, +15
-    reason = Column(String(50), nullable=False) # 'signup_ref', 'review_peer', 'boost_launch', 'dossier_create'
+    reason = Column(String(100), nullable=False) # 'signup_ref', 'review_peer', 'boost_launch', 'dossier_create'
     metadata_json = Column(JSONB, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     user = relationship("User", back_populates="credit_transactions")
+
+    @property
+    def delta(self) -> int:
+        """Canonical ledger field name from the product schema."""
+        return self.amount
 

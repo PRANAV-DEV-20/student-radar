@@ -155,7 +155,7 @@ export default function LandingPage() {
             </div>
             <h3 className="text-base font-bold text-white mb-1">Claim Guest Dossier</h3>
             <p className="text-xs text-gray-400 mb-6">
-              Sign in with Google to bind your unauthenticated guest session and unlock 50⚡ Visibility Credits.
+              Sign in with Google to bind your unauthenticated guest session and unlock 30⚡ Visibility Credits.
             </p>
             <button
               onClick={() => {

@@ -19,7 +19,13 @@ class PRStrategist:
         file_map = {
             "linkedin": "linkedin_playbook.md",
             "instagram_reel": "instagram_reel_playbook.md",
-            "cold_pitch": "cold_pitch_playbook.md"
+            "instagram_carousel": "instagram_carousel_playbook.md",
+            "x_thread": "x_thread_playbook.md",
+            "show_hn": "show_hn_playbook.md",
+            "reel_script": "reel_script_playbook.md",
+            "cold_pitch": "cold_pitch_playbook.md",
+            "policy_brief": "policy_brief_playbook.md",
+            "plain_explainer": "plain_explainer_playbook.md",
         }
         filename = file_map.get(playbook_type, "linkedin_playbook.md")
         filepath = os.path.join(self.playbooks_dir, filename)

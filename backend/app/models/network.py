@@ -10,6 +10,12 @@ class ReferralInvite(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     sender_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    dossier_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("project_dossiers.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     recipient_email_hash = Column(String(64), nullable=False, index=True)
     token = Column(String(64), unique=True, nullable=False, index=True)
     status = Column(String(30), default="pending", nullable=False) # 'pending', 'claimed', 'expired'
@@ -18,6 +24,7 @@ class ReferralInvite(Base):
 
     sender = relationship("User", foreign_keys=[sender_user_id])
     claimed_user = relationship("User", foreign_keys=[claimed_user_id])
+    dossier = relationship("ProjectDossier")
 
 class SuppressedEmail(Base):
     __tablename__ = "suppressed_emails"

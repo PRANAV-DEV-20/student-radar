@@ -16,8 +16,11 @@ from app.schemas.radar import (
     OpportunityBase,
     StrongestPick,
     UrgentDeadline,
-    NetworkingPlan
+    NetworkingPlan,
+    ReprofileRequest,
+    ReprofileResponse,
 )
+from app.schemas.matchmaking import CoBuilderMatch, CoBuilderMatchResponse
 from app.schemas.network import (
     ContactMatchRequest,
     ContactMatchResponse,
@@ -29,14 +32,18 @@ from app.schemas.credit import (
     PeerReviewRequest,
     PeerReviewResponse,
     CreditBalanceResponse,
+    CreditTransactionResponse,
+    CreditHistoryResponse,
     ReviewRubric
 )
 from app.schemas.auth import (
     TokenResponse,
+    UserProfileResponse,
     ClaimGuestRequest,
     ClaimGuestResponse,
     UserRegisterRequest,
     UserLoginRequest,
+    UserUpdateRequest,
     GoogleAuthRequest
 )
 
@@ -55,6 +62,10 @@ __all__ = [
     "StrongestPick",
     "UrgentDeadline",
     "NetworkingPlan",
+    "ReprofileRequest",
+    "ReprofileResponse",
+    "CoBuilderMatch",
+    "CoBuilderMatchResponse",
     "ContactMatchRequest",
     "ContactMatchResponse",
     "MatchedContact",
@@ -63,12 +74,16 @@ __all__ = [
     "PeerReviewRequest",
     "PeerReviewResponse",
     "CreditBalanceResponse",
+    "CreditTransactionResponse",
+    "CreditHistoryResponse",
     "ReviewRubric",
     "TokenResponse",
+    "UserProfileResponse",
     "ClaimGuestRequest",
     "ClaimGuestResponse",
     "UserRegisterRequest",
     "UserLoginRequest",
+    "UserUpdateRequest",
     "GoogleAuthRequest"
 ]
 

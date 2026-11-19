@@ -20,7 +20,21 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     # 0. Extensions
     op.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";')
-    op.execute('CREATE EXTENSION IF NOT EXISTS "vector";')
+    # Some local installs provide pgvector's SQL functions/types directly
+    # (e.g. a staged vector.dll) without installing the extension control file.
+    # In that case the `vector` type already exists and CREATE EXTENSION would
+    # fail, so only call it when the type is missing.
+    op.execute(
+        """
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'vector') THEN
+            CREATE EXTENSION IF NOT EXISTS "vector";
+          END IF;
+        END
+        $$;
+        """
+    )
 
     # 1. users
     op.create_table(

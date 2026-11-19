@@ -19,15 +19,16 @@ flowchart TD
         AuthRouter["/api/v1/auth (OAuth + Guest Claim)"]
         DossierRouter["/api/v1/dossiers (Ingest & Verify)"]
         PRRouter["/api/v1/pr (Playbook Synthesis)"]
-        RadarRouter["/api/v1/radar (Briefing & .ics)"]
+        RadarRouter["/api/v1/radar (Briefing, Live Scan & .ics)"]
         NetworkRouter["/api/v1/network (Zero-PII Contact Match)"]
         CreditsRouter["/api/v1/credits (⚡ Ledger & Peer Review)"]
     end
 
     subgraph ServiceLayer ["Service & Agent Orchestration"]
-        GeminiClient["Google Gemini SDK (google-genai)\n• Multimodal Extraction\n• Structured Outputs\n• Text-Embedding-004 (768-dim)"]
+        GeminiClient["Google Gemini SDK / REST\n• Multimodal Extraction\n• Structured Outputs\n• Radar Query Planning\n• Batch Rerank (0-100)\n• Search Grounding (events)\n• Text-Embedding-004 (768-dim)"]
         PyMuPDF["PyMuPDF Document Parser"]
-        TrendScout["Tavily/Exa Trend Scout (Whitespace)"]
+        TrendScout["Tavily-first / Exa-fallback Market Scout"]
+        SignalCache["DB Signal Cache (TTL snapshots)"]
         PRStrategist["PR Strategist (Markdown Playbooks)"]
         CardRenderer["1200x630 Card Engine (WeasyPrint/R2)"]
         DedupEngine["2-Pass Deduplication (SHA-256 + Vector Cosine)"]
@@ -36,7 +37,8 @@ flowchart TD
     subgraph BackgroundLayer ["Async Workers & Schedulers"]
         RedisBroker["Redis 7 (Broker + Rate Limiting)"]
         CeleryCrawl["Celery Beat: 5:30 AM Crawl"]
-        CeleryBriefing["Celery Beat: 6:30 AM Briefing"]
+        CelerySignalRefresh["Celery Beat: 6:00 AM Signal Cache Refresh"]
+        CeleryBriefing["Celery Beat: 7:00 AM Daily + Sun 6:00 PM Weekly Briefing"]
         CeleryOutbound["Celery Outbound Mail Worker"]
     end
 
@@ -44,6 +46,8 @@ flowchart TD
         PGUsers["users (Credits Ledger)"]
         PGDossiers["project_dossiers (VECTOR 768 HNSW)"]
         PGAssets["pr_assets (Social Copy & OG URL)"]
+        PGReach["pr_reach_events (Anonymous engagement)"]
+        PGSignals["signal_cache (TTL market snapshots)"]
         PGOpportunities["opportunities (VECTOR 768 HNSW)"]
         PGBriefings["user_briefings (Networking Plans)"]
         PGInvites["referral_invites (Hash tokens)"]
@@ -64,6 +68,7 @@ flowchart TD
 
     APILayer --> RedisBroker
     RedisBroker --> CeleryCrawl
+    RedisBroker --> CelerySignalRefresh
     RedisBroker --> CeleryBriefing
     RedisBroker --> CeleryOutbound
 
@@ -82,7 +87,11 @@ All vector columns utilize standard 768 dimensions corresponding to `text-embedd
 ```sql
 -- Extension initialization
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "vector";
+-- Only run this when pgvector is not already provided by a staged DLL.
+-- Creating the extension over manually installed vector functions can load
+-- two copies of the library and raise "attempt to redefine parameter
+-- hnsw.ef_search".
+-- CREATE EXTENSION IF NOT EXISTS "vector";
 
 -- 1. Users & Profiles
 CREATE TABLE users (
@@ -93,7 +102,7 @@ CREATE TABLE users (
     avatar_url TEXT,
     oauth_provider VARCHAR(50) DEFAULT 'google',
     oauth_id VARCHAR(255),
-    credits_balance INTEGER DEFAULT 50 CHECK (credits_balance >= 0),
+    credits_balance INTEGER DEFAULT 30 CHECK (credits_balance >= 0),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -130,6 +139,27 @@ CREATE TABLE pr_assets (
     asset_type VARCHAR(50) NOT NULL, -- 'linkedin', 'instagram_reel', 'cold_pitch', 'launch_card'
     content_json JSONB NOT NULL,
     og_image_url TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 3b. PR Reach Events (anonymous dossier/asset engagement)
+CREATE TABLE pr_reach_events (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    dossier_id UUID NOT NULL REFERENCES project_dossiers(id) ON DELETE CASCADE,
+    pr_asset_id UUID REFERENCES pr_assets(id) ON DELETE CASCADE,
+    event_type VARCHAR(30) NOT NULL, -- 'view', 'copy', 'share', 'dossier_view'
+    event_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 3c. Signal Cache (TTL market-intelligence snapshots)
+CREATE TABLE signal_cache (
+    cache_key VARCHAR(255) PRIMARY KEY,
+    payload JSONB NOT NULL,
+    provider VARCHAR(32), -- 'tavily', 'exa', or 'none'
+    is_live BOOLEAN NOT NULL DEFAULT FALSE,
+    generated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -234,7 +264,7 @@ sequenceDiagram
 
     par Parallel Background Tasks
         API->>Worker: Enqueue Trend Scout & Whitespace
-        Worker->>Scout: Query Tavily/Exa Top Voices & Gaps
+        Worker->>Scout: Gemini Grounded Events + Tavily-first / Exa-fallback Market Gaps
         Scout->>DB: Update whitespace_analysis in DB
         Worker->>Web: Notify SSE / Polling update
     and Card Generation
@@ -248,7 +278,25 @@ sequenceDiagram
 
 ## 4. Event Radar & Deduplication Engine
 
-The Event Radar aggregates high-value opportunities through scheduled Celery Beat tasks running daily:
+The Event Radar aggregates high-value opportunities through a shared 3-stage
+intent/recency pipeline. Celery Beat runs it daily at 05:30 IST; the same
+pipeline is exposed immediately through `POST /api/v1/radar/scan-live` when a
+dossier or raw idea changes.
+
+1. **Intent query planning** — Gemini fills the slots for three fixed templates
+   (hackathons/grants, news/launches, builders/discussions). Domain allowlists
+   and query shapes stay in backend config, so the model cannot broaden them.
+2. **Recency-grounded search** — Tavily (primary) / Exa (fallback) uses advanced
+   search depth, published-date filtering, `time_range`, and `max_results=10`.
+3. **Pre-DB quality gate** — root profiles, generic listing/search pages, and
+   verification-only placeholders are rejected. A single batch Gemini call
+   scores the survivors 0–100 against the project summary; items below 65 or in
+   the wrong language are dropped. Only explicit deadlines/publish dates become
+   freshness badges.
+
+Verification links still exist for `/signals/market`, but they are never
+inserted into the Radar feed. Legacy non-live opportunities are hidden by
+`radar_engine.is_radar_ready`.
 
 ### Deduplication Logic (2-Pass Protocol)
 1. **Pass 1: Cryptographic Canonical Fingerprinting**:
@@ -262,7 +310,9 @@ The Event Radar aggregates high-value opportunities through scheduled Celery Bea
 
 ```mermaid
 flowchart TD
-    RawCrawl[5:30 AM IST: Live Crawl & Grounded Search] --> URLNormalize[URL Normalization & Cleaning]
+    RawCrawl[Gemini Query Planning + Tavily/Exa Intent Search] --> Gatekeeper[Pre-DB URL & Placeholder Gatekeeper]
+    Gatekeeper --> Rerank[Batch Gemini Rerank ≥65 + Language Filter]
+    Rerank --> URLNormalize[URL Normalization & Cleaning]
     URLNormalize --> HashCalc[Compute SHA-256 Fingerprint]
     HashCalc --> DBHashCheck{SHA-256 exists in DB?}
     DBHashCheck -- Yes --> Discard[Discard Duplicate]
@@ -270,7 +320,7 @@ flowchart TD
     EmbedGen --> CosineCheck{Max Cosine Similarity > 0.88?}
     CosineCheck -- Yes --> Merge[Merge Metadata & Cross-Link Sources]
     CosineCheck -- No --> InsertDB[Insert New Opportunity]
-    InsertDB --> RankCron[6:30 AM IST: Rank Opportunities for Active Dossiers]
+    InsertDB --> RankCron[7:00 AM IST: Rank Opportunities for Active Dossiers]
 ```
 
 ---
@@ -319,5 +369,5 @@ flowchart LR
    SET user_id = :authenticated_user_id, guest_session_id = NULL 
    WHERE guest_session_id = :stored_guest_id;
    ```
-6. Award initial 50⚡ credits + assign user ownership seamlessly without data loss.
+6. Award initial 30⚡ credits + assign user ownership seamlessly without data loss.
 

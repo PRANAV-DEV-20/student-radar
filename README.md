@@ -17,6 +17,43 @@ Most student platforms fail because of the **empty-feed cold-start problem**: ne
 
 ---
 
+## 🎯 One Promise, One Flow, Three Domain Packs
+
+> **Turn any project into visibility and opportunities in 10 minutes.**
+
+The whole product now follows a single guided loop, visible and clickable from the
+[Builder Command Center](frontend/src/app/dashboard/page.tsx):
+
+```
+Understand → Position → Publish → Connect → Track → Repeat
+```
+
+| Stage | What the student sees | Where |
+| :--- | :--- | :--- |
+| **Understand** | Project DNA card, readiness score, source-linked reality check, claim flags, stage-aware next step | `/dossier` |
+| **Position** | 9 format packs, 4 angles, 6 tones, domain-specific pre-publish safety gate | `/pr-studio` |
+| **Publish** | Shareable project passport, copy-ready share text, OG card | `/p/[slug]` |
+| **Connect** | One personalized email per recipient, intent templates, consent + daily cap, day 4 / day 10 nudges | `/pr-studio?tab=outreach` |
+| **Track** | Reach totals, urgent deadlines, matched opportunities, source-linked signals | `/dashboard`, `/radar` |
+| **Repeat** | Refine the project, re-analyze, next best action | `/dashboard` |
+
+**Three domain packs** (`frontend/src/lib/domainPacks.ts`) replace generic personas.
+Each pack owns its proof definition, channels, formats, key risk, safety rules,
+opportunity types, outreach targets and preferred retrieval sources:
+
+- **AI & Tech** — demo / repo / benchmark proof; GitHub, arXiv, HN, Product Hunt.
+- **Biotech & Life Sciences** — controls, preprint, methods proof; patent-timing and health-claim guardrails; PubMed, bioRxiv, OpenAlex.
+- **Law & Policy** — citation and applicability proof; "analysis, not legal advice" framing; SSRN, legislation portals, journal CFPs.
+
+**RAG-first grounding:** similar work and opportunities come from real fetched records with links.
+The model summarizes and ranks; it never invents competitors, deadlines or metrics. Claims without
+evidence are flagged, and the UI says "no external records retrieved" when that is the truth.
+
+Every card in the dashboard is a button that opens a detail drawer with the underlying work,
+sources and next action — so the dashboard is a task surface, not a static chart.
+
+---
+
 ## 🏛️ System Architecture Overview
 
 ```
@@ -41,8 +78,8 @@ Most student platforms fail because of the **empty-feed cold-start problem**: ne
                             ▼                              ▼
              [ POSTGRESQL 16 + pgvector ]          [ BACKGROUND WORKERS ]
              • 8 Core Normalized Tables            • 5:30 AM IST Crawl
-             • VECTOR(768) HNSW Indexes            • 6:30 AM IST Briefing
-             • 2-Pass Deduplication (Cosine > 0.88)• 1200x630 Card Renderer
+             • VECTOR(768) HNSW Indexes            • 7:00 AM IST Briefing
+             • 2-Pass Deduplication (Cosine > 0.88)• Sunday 6:00 PM IST Weekly Digest
 ```
 
 ---
@@ -55,9 +92,11 @@ Most student platforms fail because of the **empty-feed cold-start problem**: ne
 | **Obsidian Atelier Aesthetic** | `#06070B` void backdrop, luminous indigo horizon, `#F8F9FA` editorial paper card | Publication-quality visual presentation, eliminating the "noisy AI demo" look. |
 | **Domain-Agnostic Personas** | Config-driven `configs/personas/*.json` | One engine powers AI/Tech, Policy/Law, Finance, and Biotech without backend modifications. |
 | **3-Column PR Studio** | Markdown playbooks (`configs/playbooks/*.md`) + Gemini LLM | 1-click tailored copy for LinkedIn, Instagram Reels, and Cold Emails. |
-| **Event Radar with .ics Export** | Celery Beat + 2-pass deduplication (SHA-256 + pgvector >0.88) | Daily briefing of high-signal hackathons and grants with 1-click calendar sync. |
+| **Event Radar with .ics Export** | Intent/recency pipeline + Celery Beat + 2-pass deduplication (SHA-256 + pgvector >0.88) | Daily briefing of high-signal hackathons and grants with 1-click calendar sync. |
+| **Unified Radar & External Intelligence** | Gemini query planning + batch rerank; Tavily-first / Exa-fallback grounded search with recency and domain locks | One feed with `Live Hackathons & Grants` / `Current News & Launches` / `Similar Builders & Discussions` tabs, freshness badges (`Posted 2d ago`, `Closes Nov 28`), and a Draft Response / PR Hook action. Root profiles, generic pages, and verification-only cards are dropped before persistence; no posts, deadlines, or metrics are invented. `POST /radar/scan-live` refreshes on demand while Celery Beat keeps daily digests. |
+| **Builder Command Center** | `/dashboard` with dossier, radar, signal, and PR-reach snapshots | At-a-glance dossiers, urgent deadlines, cross-platform pulse, and anonymous engagement totals without credits UI. |
 | **Privacy-Safe Peer Discovery** | Client-side `crypto.subtle.digest("SHA-256")` | Match campus contacts with zero raw PII stored in databases. |
-| **Visibility Credits (⚡)** | PostgreSQL ledger balance (`+10⚡` review, `-20⚡` launch boost) | Incentivizes substantive peer feedback and active discovery. |
+| **Visibility Credits (⚡)** | PostgreSQL ledger balance (`+30⚡` signup, `+10⚡` review, `−20⚡` 48h boost) | Incentivizes substantive peer feedback and active discovery. |
 
 ---
 
@@ -95,6 +134,7 @@ AI-powered-student-radar/
 │   │   │   ├── dossier.py       # Ingest, update, and response schemas
 │   │   │   ├── pr.py            # PR generation request and response models
 │   │   │   ├── radar.py         # Briefings, opportunities, and .ics export
+│   │   │   └── signals.py       # External signal & builder-match contracts
 │   │   │   ├── network.py       # Privacy-safe SHA-256 matching schemas
 │   │   │   └── auth.py          # OAuth and guest claim schemas
 │   │   ├── api/v1/              # Versioned API routes
@@ -102,12 +142,15 @@ AI-powered-student-radar/
 │   │   │   ├── dossiers.py      # Ingest, view, and verify dossiers
 │   │   │   ├── pr.py            # PR copy synthesis & launch boost
 │   │   │   ├── radar.py         # Daily briefing & calendar sync
+│   │   │   └── signals.py       # Cross-platform market intelligence
 │   │   │   ├── network.py       # Contact matching & referral invites
 │   │   │   └── credits.py       # Credit balances and peer review rewards
 │   │   ├── services/            # Core business logic & AI orchestration
-│   │   │   ├── gemini_client.py # Gemini multimodal & structured output client
+│   │   │   ├── gemini_client.py # Gemini multimodal, query planning & batch rerank
+│   │   │   ├── radar_live_service.py # Intent/recency pipeline, gatekeeper, live scan
 │   │   │   ├── ingestion_agent.py # PyMuPDF & repo parsing agent
 │   │   │   ├── trend_scout.py   # Market whitespace & top voices scout
+│   │   │   └── external_intelligence.py # FounderDB/IdeaBrowser/Trends/X/Reddit/Threads signals
 │   │   │   ├── pr_strategist.py # Playbook loader & PR generator
 │   │   │   ├── card_renderer.py # 1200x630 OpenGraph card renderer
 │   │   │   ├── dedup_service.py # SHA-256 + pgvector cosine deduplicator
@@ -143,7 +186,9 @@ AI-powered-student-radar/
         │   │   └── page.tsx
         │   ├── pr-studio/       # Screen 2: 3-Column PR Studio
         │   │   └── page.tsx
-        │   ├── radar/           # Screen 3: Daily/Weekly Opportunity Radar
+        │   ├── radar/           # Screen 3: Unified Opportunity & Market Radar
+        │   │   └── page.tsx
+        │   ├── dashboard/       # Student Builder Command Center (no credits UI)
         │   │   └── page.tsx
         │   ├── p/[slug]/        # Screen 4: Public SSR Proof-of-Work Dossier
         │   │   └── page.tsx

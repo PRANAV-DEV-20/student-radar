@@ -50,7 +50,7 @@ export function PeerReviewModal({
 
       setIsSuccess(true);
       if (onReviewSuccess) {
-        onReviewSuccess(res.new_balance || 60);
+        onReviewSuccess(res.new_balance || 40);
       }
       setTimeout(() => {
         setIsSuccess(false);
