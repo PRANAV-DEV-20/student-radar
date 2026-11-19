@@ -1,0 +1,127 @@
+name: student-radar
+
+x-backend-env: &backend-env
+  env_file:
+    - .env
+  environment:
+    APP_ENV: production
+    PORT: 8000
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-radar_admin}:${POSTGRES_PASSWORD:-radar_secret_pass}@postgres:5432/${POSTGRES_DB:-student_radar_db}
+    SYNC_DATABASE_URL: postgresql://${POSTGRES_USER:-radar_admin}:${POSTGRES_PASSWORD:-radar_secret_pass}@postgres:5432/${POSTGRES_DB:-student_radar_db}
+    REDIS_URL: redis://redis:6379/0
+    CORS_ORIGINS: ${CORS_ORIGINS:-https://localhost}
+    ENABLE_CELERY_DISPATCH: ${ENABLE_CELERY_DISPATCH:-true}
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-radar_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-radar_secret_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-student_radar_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-radar_admin} -d ${POSTGRES_DB:-student_radar_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    <<: *backend-env
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  celery_worker:
+    <<: *backend-env
+    build:
+      context: ./backend
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app worker --loglevel=info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+
+  celery_beat:
+    <<: *backend-env
+    build:
+      context: ./backend
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app beat --loglevel=info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:

@@ -235,6 +235,9 @@ AI-powered-student-radar/
    - **Backend REST Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
    - **Database (pgvector)**: `localhost:5432`
 
+   For a public VPS deployment with Caddy auto-HTTPS, use
+   `docker-compose.prod.yml` and follow [DEPLOYMENT.md](DEPLOYMENT.md).
+
 ---
 
 ### Option 2: Local Development Setup

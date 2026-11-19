@@ -2,50 +2,86 @@
 
 ## Architecture
 
-- **Frontend**: Next.js app in `frontend/`, deployed to Vercel.
-- **Backend**: FastAPI app in `backend/`, deployed as a Docker Web Service on Render.
-- **Data**: Render PostgreSQL 16 with `pgvector` and Render Redis.
-- **Migrations**: `backend/start.sh` normalizes the database URL and runs
-  `alembic upgrade head` before starting Uvicorn.
+The production stack is defined in `docker-compose.prod.yml`:
 
-## GitHub
+- **Caddy** terminates HTTPS and routes `/api/*` to the API and everything else to the web app.
+- **Frontend**: Next.js 15 in `frontend/`, built with `NEXT_PUBLIC_API_URL` baked in.
+- **Backend**: FastAPI in `backend/`, started via `backend/start.sh` which runs `alembic upgrade head` before Uvicorn.
+- **Data**: PostgreSQL 16 with `pgvector`, plus Redis.
+- **Workers**: Celery worker and Celery Beat for scheduled digests.
 
-The repo has no configured remote yet. Create an empty GitHub repository named
-`student-radar`, then add the remote and push:
+## Docker deployment (primary)
+
+### 1. Prepare the VPS
+
+Use a Linux VPS with Docker Engine and the Compose plugin installed. Open ports
+`80` and `443`, and point your domain’s DNS A record at the VPS IP.
 
 ```bash
-git remote add origin https://github.com/<owner>/student-radar.git
-git add -A
-git commit -m "feat: source-backed radar and production deployment setup"
-git push -u origin main
+git clone https://github.com/PRANAV-DEV-20/student-radar.git
+cd student-radar
+cp .env.example .env
 ```
 
-## Render
+### 2. Configure `.env`
 
-1. Create a new **Blueprint** from `render.yaml`.
-2. Fill the `sync: false` environment variables:
-   - `GEMINI_API_KEY`
-   - `TAVILY_API_KEY`
-   - `EXA_API_KEY` (optional fallback)
-3. `JWT_SECRET` is generated automatically by Render.
-4. After Vercel deploys, set `CORS_ORIGINS` to the real Vercel domain, e.g.
-   `https://student-radar.vercel.app`.
-5. The API health check is `GET /health`.
+At minimum, set:
 
-## Vercel
+```env
+DOMAIN=radar.example.com
+CORS_ORIGINS=https://radar.example.com
+NEXT_PUBLIC_API_URL=https://radar.example.com/api/v1
+NEXT_PUBLIC_APP_URL=https://radar.example.com
+POSTGRES_PASSWORD=<long-random-value>
+JWT_SECRET=<long-random-value>
+GEMINI_API_KEY=<your-key>
+TAVILY_API_KEY=<your-key>
+EXA_API_KEY=<optional>
+ENABLE_CELERY_DISPATCH=true
+```
 
-1. Import the GitHub repo.
-2. Set **Root Directory** to `frontend`.
-3. Framework preset: **Next.js**.
-4. Add environment variable:
-   - `NEXT_PUBLIC_API_URL=https://<render-service>.onrender.com/api/v1`
-5. Deploy.
+`NEXT_PUBLIC_API_URL` is baked into the frontend at build time, so set it before
+building the image.
 
-## Local Docker preview
+### 3. Start the stack
 
 ```bash
+docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml logs -f
+```
+
+The site will be available at `https://$DOMAIN`. The API health check is
+`GET /health` behind `/api/health`.
+
+### 4. Useful commands
+
+```bash
+docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml logs -f backend
+docker compose -f docker-compose.prod.yml restart backend
+docker compose -f docker-compose.prod.yml down
+```
+
+To deploy a new version:
+
+```bash
+git pull origin main
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+## Local development
+
+```bash
+cp .env.example .env
 docker compose up --build
 ```
 
 The frontend runs at `http://localhost:3000` and the API at
 `http://localhost:8000`.
+
+## Vercel + Render (alternative)
+
+`render.yaml` and `frontend/vercel.json` are kept as an alternative managed
+deployment path. Render creates Postgres, Redis, and the FastAPI web service;
+Vercel builds the Next.js frontend with `NEXT_PUBLIC_API_URL` pointing at the
+Render service. For that path, set `CORS_ORIGINS` to the Vercel domain.
