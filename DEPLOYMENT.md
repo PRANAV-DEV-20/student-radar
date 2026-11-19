@@ -23,7 +23,40 @@ cd student-radar
 cp .env.example .env
 ```
 
-### 2. Configure `.env`
+`0.0.0.0` is only a bind address meaning “listen on all interfaces”. It is not
+an address you can SSH to. Use the VPS public IP or DNS name, e.g.
+`root@203.0.113.10`.
+
+### 2. SSH access (remote deploy)
+
+Generate a key on the machine that will run the deployment:
+
+```bash
+ssh-keygen -t ed25519 -C "student-radar-deploy" -f ~/.ssh/id_ed25519_student_radar
+```
+
+Copy only the **public** key (`~/.ssh/id_ed25519_student_radar.pub`) to the VPS:
+
+```bash
+ssh-copy-id -i ~/.ssh/id_ed25519_student_radar.pub root@<VPS_IP>
+```
+
+Or add it manually on the VPS:
+
+```bash
+mkdir -p /root/.ssh
+echo 'ssh-ed25519 AAAA... student-radar-deploy' >> /root/.ssh/authorized_keys
+chmod 700 /root/.ssh
+chmod 600 /root/.ssh/authorized_keys
+```
+
+Never share the private key (`id_ed25519_student_radar`). Test with:
+
+```bash
+ssh -i ~/.ssh/id_ed25519_student_radar root@<VPS_IP>
+```
+
+### 3. Configure `.env`
 
 At minimum, set:
 
@@ -43,7 +76,7 @@ ENABLE_CELERY_DISPATCH=true
 `NEXT_PUBLIC_API_URL` is baked into the frontend at build time, so set it before
 building the image.
 
-### 3. Start the stack
+### 4. Start the stack
 
 ```bash
 docker compose -f docker-compose.prod.yml up -d --build
@@ -53,7 +86,7 @@ docker compose -f docker-compose.prod.yml logs -f
 The site will be available at `https://$DOMAIN`. The API health check is
 `GET /health` behind `/api/health`.
 
-### 4. Useful commands
+### 5. Useful commands
 
 ```bash
 docker compose -f docker-compose.prod.yml ps
