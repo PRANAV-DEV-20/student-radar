@@ -162,6 +162,12 @@ async def health_check():
     }
 
 
+@app.get("/api/health", tags=["Health"], include_in_schema=False)
+async def proxied_health_check():
+    """Alias used by the Caddy /api/* route and the public health monitor."""
+    return await health_check()
+
+
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
     """Browsers request this from every origin they visit. Answering 204 keeps

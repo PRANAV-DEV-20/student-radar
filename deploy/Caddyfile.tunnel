@@ -1,0 +1,13 @@
+# HTTP-only routing for a Cloudflare Quick Tunnel.
+# Cloudflare terminates TLS, so Caddy only needs to route by path on port 80.
+:80 {
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy backend:8000
+	}
+
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

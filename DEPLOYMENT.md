@@ -10,6 +10,31 @@ The production stack is defined in `docker-compose.prod.yml`:
 - **Data**: PostgreSQL 16 with `pgvector`, plus Redis.
 - **Workers**: Celery worker and Celery Beat for scheduled digests.
 
+## Local Docker + Cloudflare Quick Tunnel (no VPS)
+
+Use this when you want a public HTTPS URL without renting a VPS or configuring DNS:
+
+```bash
+# 1. Start the full stack. Caddy publishes only host port 8080 in this mode.
+docker compose -f docker-compose.tunnel.yml up -d --build --wait
+
+# 2. Download cloudflared (Windows example), then start a free quick tunnel.
+cloudflared tunnel --no-autoupdate --url http://localhost:8080
+```
+
+`cloudflared` prints a public URL such as
+`https://example-trycloudflare-subdomain.trycloudflare.com`. Open `/radar` and
+verify `/api/health` on that origin. The frontend uses a relative API base
+(`/api/v1`), so no rebuild is needed when the random hostname changes.
+
+Notes:
+
+- This machine must stay powered on with Docker and `cloudflared` running.
+- A Quick Tunnel URL is random and changes whenever `cloudflared` restarts.
+- For a stable custom hostname, use a named Cloudflare Tunnel with a domain
+  whose DNS is managed by Cloudflare, then switch back to
+  `docker-compose.prod.yml`.
+
 ## Docker deployment (primary)
 
 ### 1. Prepare the VPS
