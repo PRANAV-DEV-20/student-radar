@@ -328,3 +328,5 @@ Visit [http://localhost:3000](http://localhost:3000) to start exploring.
 ## 📄 License
 This project is licensed under the Apache 2.0 License. Built for students, builders, and innovators globally.
 
+#   s t u d e n t - r a d a r  
+ 
