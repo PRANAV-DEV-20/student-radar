@@ -69,6 +69,26 @@ git pull origin main
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
+## Free domain with DuckDNS
+
+1. Sign in at https://www.duckdns.org and create a domain such as
+   `student-radar-xyz.duckdns.org`.
+2. Set its **current IP** to your VPS public IP.
+3. Use that domain in `.env`:
+
+   ```env
+   DOMAIN=student-radar-xyz.duckdns.org
+   CORS_ORIGINS=https://student-radar-xyz.duckdns.org
+   NEXT_PUBLIC_API_URL=https://student-radar-xyz.duckdns.org/api/v1
+   NEXT_PUBLIC_APP_URL=https://student-radar-xyz.duckdns.org
+   ```
+
+4. Make sure VPS ports `80` and `443` are open, then start the stack. Caddy will
+   request and renew a Let’s Encrypt certificate automatically.
+
+If your VPS IP changes, update the DuckDNS record (or run their update cron).
+A static IP avoids this step.
+
 ## Local development
 
 ```bash
