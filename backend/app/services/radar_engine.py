@@ -56,6 +56,9 @@ _REGISTRATION_DEADLINE_BASES = {
     "application_close_date",
     "explicit_deadline",
     "registration_deadline_in_search_snippet",
+    # A future, explicitly stated event date is actionable even when a
+    # registration deadline is not published in the search snippet.
+    "event_date",
 }
 
 

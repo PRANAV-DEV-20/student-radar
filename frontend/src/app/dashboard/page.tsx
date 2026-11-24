@@ -71,6 +71,7 @@ export default function DashboardPage() {
   const [currentDossier, setCurrentDossier] = useState<any>(null);
   const [dossiers, setDossiers] = useState<any[]>([]);
   const [briefing, setBriefing] = useState<any>(null);
+  const [radarUnavailable, setRadarUnavailable] = useState(false);
   const [market, setMarket] = useState<any>(null);
   const [reach, setReach] = useState<any>(null);
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
@@ -127,8 +128,17 @@ export default function DashboardPage() {
   useEffect(() => {
     let cancelled = false;
     api.getRadarBriefing(persona)
-      .then((data) => !cancelled && setBriefing(data))
-      .catch((error) => console.error("Dashboard radar error:", error));
+      .then((data) => {
+        if (cancelled) return;
+        setBriefing(data);
+        setRadarUnavailable(false);
+      })
+      .catch((error) => {
+        // Radar has no local fallback by design: never invent opportunities.
+        // Surface an honest "unavailable" state instead of a raw fetch stack.
+        if (!cancelled) setRadarUnavailable(true);
+        console.warn("Radar briefing unavailable:", error?.message || error);
+      });
     return () => { cancelled = true; };
   }, [persona]);
 
@@ -276,7 +286,7 @@ export default function DashboardPage() {
           <p className="text-sm leading-relaxed text-gray-300">{stage.description}</p>
           <DrawerSection title={`Deliverables · ${isDone ? "Done" : "To do"}`}>
             {stage.deliverables.map((item) => (
-              <DrawerRow key={item} title={item} action={<ChevronRight className="h-3 w-3 text-gray-500" />} />
+              <DrawerRow key={item} title={item} action={<ChevronRight className="h-3 w-3 text-gray-400" />} />
             ))}
           </DrawerSection>
           {stage.id === "understand" && dna && (
@@ -365,7 +375,7 @@ export default function DashboardPage() {
         );
       }
       if (!items.length) {
-        return <p className="text-xs text-gray-500">Nothing here yet. Generate a dossier or run a radar scan to populate this view.</p>;
+        return <p className="text-xs text-gray-400">Nothing here yet. Generate a dossier or run a radar scan to populate this view.</p>;
       }
       return (
         <div className="space-y-2">
@@ -394,7 +404,7 @@ export default function DashboardPage() {
           <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
             <p className="text-sm font-bold text-white">{item.title}</p>
             <p className="mt-1 text-xs text-gray-400">{item.description}</p>
-            <div className="mt-3 flex flex-wrap gap-2 font-mono text-[10px] text-amber-200">
+            <div className="mt-3 flex flex-wrap gap-2 font-mono text-[10px] text-amber-300">
               <span>{item.category || "opportunity"}</span>
               {item.hours_remaining ? <span>{item.hours_remaining}h left</span> : null}
               {item.reward_pool ? <span>{item.reward_pool}</span> : null}
@@ -458,14 +468,14 @@ export default function DashboardPage() {
       );
     }
     if (drawer.kind === "deadline" || drawer.kind === "opportunity") {
-      return <button onClick={() => tailorPitch(drawer.payload)} className="flex items-center gap-1.5 rounded-lg bg-horizon-indigo px-3 py-2 text-[11px] font-semibold text-white">Tailor pitch in PR Studio <ArrowRight className="h-3 w-3" /></button>;
+      return <button onClick={() => tailorPitch(drawer.payload)} className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-horizon-indigo to-horizon-violet px-3 py-2 text-[11px] font-semibold text-white">Tailor pitch in PR Studio <ArrowRight className="h-3 w-3" /></button>;
     }
     if (drawer.kind === "signal") {
-      return <button onClick={() => draftHook(drawer.payload)} className="flex items-center gap-1.5 rounded-lg bg-horizon-indigo px-3 py-2 text-[11px] font-semibold text-white">Draft PR hook <ArrowRight className="h-3 w-3" /></button>;
+      return <button onClick={() => draftHook(drawer.payload)} className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-horizon-indigo to-horizon-violet px-3 py-2 text-[11px] font-semibold text-white">Draft PR hook <ArrowRight className="h-3 w-3" /></button>;
     }
     if (drawer.kind === "builder") {
       return (
-        <button onClick={() => draftHook({ id: drawer.payload?.id, source: drawer.payload?.platform, title: drawer.payload?.name, summary: drawer.payload?.outreach_hook, url: drawer.payload?.profile_url, is_live: drawer.payload?.is_live })} className="flex items-center gap-1.5 rounded-lg bg-horizon-indigo px-3 py-2 text-[11px] font-semibold text-white"><Mail className="h-3 w-3" /> Draft outreach</button>
+        <button onClick={() => draftHook({ id: drawer.payload?.id, source: drawer.payload?.platform, title: drawer.payload?.name, summary: drawer.payload?.outreach_hook, url: drawer.payload?.profile_url, is_live: drawer.payload?.is_live })} className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-horizon-indigo to-horizon-violet px-3 py-2 text-[11px] font-semibold text-white"><Mail className="h-3 w-3" /> Draft outreach</button>
       );
     }
     if (drawer.kind === "stage") {
@@ -475,20 +485,20 @@ export default function DashboardPage() {
           <button
             onClick={rerunAnalysis}
             disabled={isRerunning}
-            className="flex items-center gap-1.5 rounded-lg bg-horizon-indigo px-3 py-2 text-[11px] font-semibold text-white disabled:opacity-60"
+            className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-horizon-indigo to-horizon-violet px-3 py-2 text-[11px] font-semibold text-white disabled:opacity-60"
           >
             {isRerunning ? <RefreshCw className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
             {isRerunning ? "Re-analysing…" : "Re-analyse project"}
           </button>
         );
       }
-      return <Link href={stage.route} className="flex items-center gap-1.5 rounded-lg bg-horizon-indigo px-3 py-2 text-[11px] font-semibold text-white">Open {stage.label} <ArrowRight className="h-3 w-3" /></Link>;
+      return <Link href={stage.route} className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-horizon-indigo to-horizon-violet px-3 py-2 text-[11px] font-semibold text-white">Open {stage.label} <ArrowRight className="h-3 w-3" /></Link>;
     }
     return <button onClick={() => setDrawer(null)} className="text-[11px] text-gray-400 hover:text-white">Close</button>;
   };
 
   return (
-    <div className="relative min-h-screen bg-void text-white selection:bg-horizon-indigo selection:text-white">
+    <div className="relative min-h-screen bg-void text-white">
       <div className="absolute top-0 left-1/2 -translate-x-1/2 h-[350px] w-[1200px] bg-horizon-radial pointer-events-none -z-10" />
       <Navbar currentPersona={persona} onPersonaChange={setPersona} />
 
@@ -496,7 +506,7 @@ export default function DashboardPage() {
         <div>
           <div className="mb-2 flex items-center gap-2">
             <span className="font-mono text-xs uppercase tracking-widest text-horizon-indigo">// STUDENT BUILDER COMMAND CENTER</span>
-            <span className="font-mono text-xs text-gray-500">[{personaLabel} pack]</span>
+            <span className="font-mono text-xs text-gray-400">[{personaLabel} pack]</span>
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
             Turn any project into visibility and opportunities in 10 minutes.
@@ -542,7 +552,7 @@ export default function DashboardPage() {
                 <div className="min-w-0">
                   <span className="block font-mono text-2xl font-bold text-white">{isLoading ? "—" : card.value}</span>
                   <span className="mt-0.5 block text-xs text-gray-300">{card.label}</span>
-                  <span className="block truncate text-[10px] text-gray-500">{card.detail}</span>
+                  <span className="block truncate text-[10px] text-gray-400">{card.detail}</span>
                 </div>
               </button>
             );
@@ -554,11 +564,11 @@ export default function DashboardPage() {
           <section className="space-y-4 rounded-2xl border border-void-border bg-void-card p-5 lg:col-span-7">
             <div className="flex items-center justify-between gap-2 border-b border-void-border pb-3">
               <h2 className="flex items-center gap-2 text-sm font-bold text-white"><FileText className="h-4 w-4 text-horizon-indigo" /> Project Dossiers</h2>
-              <Link href="/dossier" className="text-xs font-semibold text-horizon-indigo hover:text-indigo-400">New dossier →</Link>
+              <Link href="/dossier-v2" className="text-xs font-semibold text-horizon-indigo hover:text-horizon-indigo">New research dossier →</Link>
             </div>
 
             {isLoading ? (
-              <p className="text-xs text-gray-500">Loading saved dossiers…</p>
+              <p className="text-xs text-gray-400">Loading saved dossiers…</p>
             ) : dossiers.length === 0 ? (
               <div className="rounded-xl border border-void-border bg-void p-4 text-xs text-gray-400">
                 No dossiers saved yet. Paste a repo, PDF or idea in the Studio to generate your first proof-of-work page.
@@ -588,7 +598,7 @@ export default function DashboardPage() {
                     <div className="flex flex-wrap gap-2 text-xs">
                       <button onClick={() => setDrawer({ kind: "dossier", eyebrow: "PROJECT WORK", title: dossier.title, subtitle: dossier.tagline, payload: dossier })} className="flex items-center gap-1 rounded-lg border border-void-border px-3 py-1.5 text-gray-300 hover:text-white"><Eye className="h-3 w-3" /> View work</button>
                       <button onClick={() => openPRStudio(dossier)} className="flex items-center gap-1 rounded-lg bg-gradient-to-r from-horizon-indigo to-horizon-violet px-3 py-1.5 font-semibold text-white"><Sparkles className="h-3 w-3" /> PR Studio</button>
-                      <button onClick={() => copyShareLink(slug)} className="flex items-center gap-1 rounded-lg border border-void-border px-3 py-1.5 text-gray-300 hover:text-white">{copiedSlug === slug ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />} {copiedSlug === slug ? "Copied" : "Copy link"}</button>
+                      <button onClick={() => copyShareLink(slug)} className="flex items-center gap-1 rounded-lg border border-void-border px-3 py-1.5 text-gray-300 hover:text-white">{copiedSlug === slug ? <Check className="h-3 w-3 text-emerald-700" /> : <Copy className="h-3 w-3" />} {copiedSlug === slug ? "Copied" : "Copy link"}</button>
                       <Link href={`/dossier?slug=${slug}`} className="flex items-center gap-1 rounded-lg border border-void-border px-3 py-1.5 text-gray-300 hover:text-white"><FileText className="h-3 w-3" /> Edit</Link>
                     </div>
                   </div>
@@ -601,10 +611,12 @@ export default function DashboardPage() {
           <section className="space-y-4 rounded-2xl border border-void-border bg-void-card p-5 lg:col-span-5">
             <div className="flex items-center justify-between gap-2 border-b border-void-border pb-3">
               <h2 className="flex items-center gap-2 text-sm font-bold text-white"><Clock className="h-4 w-4 text-amber-400" /> Urgent Deadlines</h2>
-              <Link href="/radar" className="text-xs text-horizon-indigo hover:text-indigo-400">Open Radar →</Link>
+              <Link href="/radar" className="text-xs text-horizon-indigo hover:text-horizon-indigo">Open Radar →</Link>
             </div>
-            {urgentDeadlines.length === 0 ? (
-              <p className="text-xs text-gray-500">Nothing closing in the next 72 hours. Check back after the next radar crawl.</p>
+            {radarUnavailable && urgentDeadlines.length === 0 ? (
+              <p className="text-xs text-amber-300/80">Radar feed unavailable — the API may be offline. Retry once it is running.</p>
+            ) : urgentDeadlines.length === 0 ? (
+              <p className="text-xs text-gray-400">Nothing closing in the next 72 hours. Check back after the next radar crawl.</p>
             ) : (
               urgentDeadlines.slice(0, 3).map((deadline: any) => (
                 <button
@@ -616,7 +628,7 @@ export default function DashboardPage() {
                     <h3 className="text-xs font-bold leading-snug text-white">{deadline.title}</h3>
                     <span className="shrink-0 font-mono text-[10px] text-amber-300">{deadline.hours_remaining}h</span>
                   </div>
-                  <div className="flex items-center justify-between text-[10px] font-mono uppercase text-gray-500">
+                  <div className="flex items-center justify-between text-[10px] font-mono uppercase text-gray-400">
                     <span>{deadline.category || "opportunity"}</span>
                     <span className="flex items-center gap-1 text-horizon-indigo">View details <ChevronRight className="h-3 w-3" /></span>
                   </div>
@@ -629,8 +641,8 @@ export default function DashboardPage() {
         {/* Cross-platform pulse */}
         <section className="space-y-4 rounded-2xl border border-void-border bg-void-card p-5">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-void-border pb-3">
-            <h2 className="flex items-center gap-2 text-sm font-bold text-white"><Globe2 className="h-4 w-4 text-horizon-violet" /> Cross-Platform Idea Visibility</h2>
-            <span className="font-mono text-[10px] text-gray-500">{market ? `Interest: ${market.trend_direction}` : "scanning…"}</span>
+            <h2 className="flex items-center gap-2 text-sm font-bold text-white"><Globe2 className="h-4 w-4 text-horizon-indigo" /> Cross-Platform Idea Visibility</h2>
+            <span className="font-mono text-[10px] text-gray-400">{market ? `Interest: ${market.trend_direction}` : "scanning…"}</span>
           </div>
           {market && <p className="max-w-4xl text-xs text-gray-400">{market.summary}</p>}
 
@@ -650,13 +662,13 @@ export default function DashboardPage() {
                   <span className="flex items-center gap-1 text-[11px] text-horizon-indigo">Open details <ChevronRight className="h-3 w-3" /></span>
                 </button>
               ))}
-              {signals.length === 0 && <p className="text-xs text-gray-500">No signals yet. Run a live radar scan.</p>}
+              {signals.length === 0 && <p className="text-xs text-gray-400">No signals yet. Run a live radar scan.</p>}
             </div>
 
             <div className="space-y-3 rounded-xl border border-void-border bg-void p-4 lg:col-span-4">
-              <h3 className="flex items-center gap-2 text-xs font-bold text-white"><Users className="h-3.5 w-3.5 text-horizon-violet" /> Similar Minds</h3>
+              <h3 className="flex items-center gap-2 text-xs font-bold text-white"><Users className="h-3.5 w-3.5 text-horizon-indigo" /> Similar Minds</h3>
               {similarBuilders.length === 0 ? (
-                <p className="text-[11px] text-gray-500">Adjacent builders appear here when a search provider is connected. Until then, use the source links to explore each community directly.</p>
+                <p className="text-[11px] text-gray-400">Adjacent builders appear here when a search provider is connected. Until then, use the source links to explore each community directly.</p>
               ) : (
                 similarBuilders.slice(0, 3).map((builder: any) => (
                   <button
@@ -664,8 +676,8 @@ export default function DashboardPage() {
                     onClick={() => setDrawer({ kind: "builder", eyebrow: "COLLABORATOR", title: builder.name, payload: builder })}
                     className="block w-full border-t border-void-border pt-3 text-left first:border-0 first:pt-0"
                   >
-                    <p className="line-clamp-2 text-[11px] font-semibold text-gray-200">{builder.name}</p>
-                    <p className="mt-1 line-clamp-2 text-[10px] text-gray-500">{builder.outreach_hook}</p>
+                    <p className="line-clamp-2 text-[11px] font-semibold text-white">{builder.name}</p>
+                    <p className="mt-1 line-clamp-2 text-[10px] text-gray-400">{builder.outreach_hook}</p>
                     <span className="mt-1 flex items-center gap-1 text-[11px] text-horizon-indigo">Draft outreach <ChevronRight className="h-3 w-3" /></span>
                   </button>
                 ))
@@ -674,7 +686,7 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex items-center gap-2 pt-2">
-            <Calendar className="h-3.5 w-3.5 text-gray-500" />
+            <Calendar className="h-3.5 w-3.5 text-gray-400" />
             <Link href="/radar" className="text-xs text-gray-400 hover:text-white">See the full unified radar feed →</Link>
           </div>
         </section>
@@ -683,7 +695,7 @@ export default function DashboardPage() {
         <section className="rounded-2xl border border-void-border bg-void-card p-5">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-void-border pb-3">
             <h2 className="flex items-center gap-2 text-sm font-bold text-white"><AlertTriangle className="h-4 w-4 text-amber-400" /> {pack.shortLabel} pack rules</h2>
-            <span className="font-mono text-[10px] text-gray-500">one engine · three packs</span>
+            <span className="font-mono text-[10px] text-gray-400">one engine · three packs</span>
           </div>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
             {[
@@ -692,14 +704,14 @@ export default function DashboardPage() {
               { title: "Retrieval sources", items: pack.radarSources },
             ].map((group) => (
               <div key={group.title}>
-                <p className="font-mono text-[10px] uppercase tracking-widest text-gray-500">{group.title}</p>
+                <p className="font-mono text-[10px] uppercase tracking-widest text-gray-400">{group.title}</p>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {group.items.map((item) => <span key={item} className="rounded-full border border-void-border px-2 py-0.5 text-[10px] text-gray-300">{item}</span>)}
                 </div>
               </div>
             ))}
           </div>
-          <p className="mt-3 text-[11px] text-amber-200/90">Key risk: {pack.keyRisk}</p>
+          <p className="mt-3 text-[11px] text-amber-300/90">Key risk: {pack.keyRisk}</p>
         </section>
       </main>
 

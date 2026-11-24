@@ -157,9 +157,128 @@ docker compose up --build
 The frontend runs at `http://localhost:3000` and the API at
 `http://localhost:8000`.
 
+If another application already owns those ports, use the alternate-port setup.
+It publishes the frontend on `http://localhost:3200`, Postgres on `55433` and
+Redis on `6380` with isolated container/volume names, and bakes
+`http://localhost:8100/api/v1` into the frontend at build time.
+
+```bash
+docker compose -f docker-compose.alt.yml up -d --build
+```
+
+Run the API from host Python on port 8100 (no backend image build required):
+
+```powershell
+cd backend
+$env:DATABASE_URL="postgresql+asyncpg://radar_admin:radar_secret_pass@localhost:55433/student_radar_db"
+$env:SYNC_DATABASE_URL="postgresql+psycopg2://radar_admin:radar_secret_pass@localhost:55433/student_radar_db"
+$env:REDIS_URL="redis://localhost:6380/0"
+$env:CORS_ORIGINS="http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002,http://localhost:3003,http://127.0.0.1:3003,http://localhost:3200,http://127.0.0.1:3200"
+$env:PORT="8100"
+python -m alembic upgrade head
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8100
+```
+
+If the API must survive after the PowerShell window closes, start it detached:
+
+```powershell
+$env:DATABASE_URL="postgresql+asyncpg://radar_admin:radar_secret_pass@localhost:55433/student_radar_db"
+$env:SYNC_DATABASE_URL="postgresql://radar_admin:radar_secret_pass@localhost:55433/student_radar_db"
+$env:REDIS_URL="redis://localhost:6380/0"
+$env:CORS_ORIGINS="http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002,http://localhost:3003,http://127.0.0.1:3003,http://localhost:3200,http://127.0.0.1:3200"
+Start-Process python -ArgumentList "-m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8100" -WindowStyle Hidden
+```
+
+Set `GEMINI_API_KEY` / `TAVILY_API_KEY` in the same shell if you want live AI
+and search results; without them the API still serves the grounded DB records.
+
+For a local dev server (`npm run dev` in `frontend/`), `frontend/.env.local`
+points `NEXT_PUBLIC_API_URL` at the same `8100` API, and the CORS list above
+includes dev ports `3000`–`3003` as well as the Docker frontend on `3200`.
+
+Never run `next build` and `next dev` in this folder at the same time: both use
+`.next`, and the build deletes/replaces the dev server's manifests, causing
+`Cannot find module ... middleware-manifest.json` or stale
+`/_next/static/... 404` errors. The local dev server is therefore started with
+an isolated output directory:
+
+```powershell
+cd frontend
+$env:PORT = "3001"
+$env:NEXT_DIST_DIR = ".next-dev"
+npm run dev
+```
+
+`next.config.ts` reads `NEXT_DIST_DIR` and otherwise defaults to `.next`, so
+production builds are unchanged. If you already saw a stale-chunk error, hard
+refresh the browser (`Ctrl+Shift+R`).
+
+To stop the alternate stack later:
+
+```powershell
+docker compose -f docker-compose.alt.yml down
+```
+
+Then press `Ctrl+C` in the terminal running `uvicorn` to stop the API. If it
+was started detached, stop it with:
+
+```powershell
+Get-NetTCPConnection -LocalPort 8100 -State Listen |
+  ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+```
+
+### Troubleshooting: `TypeError: Failed to fetch`
+
+This is a browser network error from the frontend calling `NEXT_PUBLIC_API_URL`.
+It is not an application logic bug. Check, in order:
+
+1. The API is actually running for **this** project:
+   `curl http://localhost:8000/api/v1/radar/briefing?persona=tech_builder`
+   should return JSON (a 404 means a different service owns port 8000 — stop it
+   or run this stack on another port).
+2. `NEXT_PUBLIC_API_URL` is correct for where the frontend is served. It is
+   **baked in at build time**, so rebuild the frontend after changing it. Use a
+   reachable absolute URL (or `/api/v1` when a reverse proxy serves the API on
+   the same origin). Never ship `http://localhost:8000` in a deployed build.
+3. The browser origin is listed in the backend's `CORS_ORIGINS` (a CORS
+   rejection also surfaces as `Failed to fetch`).
+4. An HTTPS page must call an HTTPS API — mixing HTTPS → HTTP is blocked.
+
+The Radar keeps the last successful briefing and shows an "unavailable" notice
+instead of replacing it with invented records; there is deliberately no local
+fallback for Radar data.
+
+For Dossier v2 runs, an `All models failed ... HTTP 429/503` error means the AI
+provider is rate-limited or temporarily unavailable, not that the input was too
+long. Wait a minute and rerun the generation.
+
 ## Vercel + Render (alternative)
 
 `render.yaml` and `frontend/vercel.json` are kept as an alternative managed
 deployment path. Render creates Postgres, Redis, and the FastAPI web service;
 Vercel builds the Next.js frontend with `NEXT_PUBLIC_API_URL` pointing at the
-Render service. For that path, set `CORS_ORIGINS` to the Vercel domain.
+Render service.
+
+Safe deployment order:
+
+1. Deploy the Render backend first and confirm `GET /health` returns `200`.
+2. In Vercel, import the repository with **Root Directory = `frontend`** and
+   framework **Next.js**.
+3. Set only public frontend variables in Vercel:
+
+   ```text
+   NEXT_PUBLIC_API_URL=https://<render-service>.onrender.com/api/v1
+   NEXT_PUBLIC_APP_URL=https://<your-vercel-domain>
+   ```
+
+   Never put `GEMINI_API_KEY`, `GROQ_API_KEY`, `TAVILY_API_KEY`,
+   `DATABASE_URL`, or `JWT_SECRET` in Vercel. Anything named `NEXT_PUBLIC_*`
+   is visible in the browser bundle.
+4. Set the backend secrets in Render: `GEMINI_API_KEY`, `GROQ_API_KEY`,
+   `TAVILY_API_KEY`, `EXA_API_KEY`, and a generated `JWT_SECRET`.
+5. Set `CORS_ORIGINS` on Render to the exact Vercel origin(s), for example
+   `https://your-app.vercel.app`. Add preview deployment origins only when you
+   trust them; do not allow wildcard `https://*.vercel.app` with credentials.
+6. Deploy Vercel **after** the backend URL is final, because
+   `NEXT_PUBLIC_API_URL` is baked into the bundle at build time. Use HTTPS for
+   both sides to avoid mixed-content `Failed to fetch` errors.

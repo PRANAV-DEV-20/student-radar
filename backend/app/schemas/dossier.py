@@ -134,8 +134,7 @@ class DossierIngestRequest(BaseModel):
     raw_content: str = Field(
         ...,
         min_length=5,
-        max_length=100_000,
-        description="URL or raw text content of the project",
+        description="URL or raw text content of the project. No upper length limit.",
     )
     domain_persona: str = Field(default="tech_builder", description="Domain persona key")
 

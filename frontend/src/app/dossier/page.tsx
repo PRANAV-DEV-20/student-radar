@@ -214,6 +214,14 @@ function DossierContent() {
         </div>
       </div>
 
+      <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+        The legacy single-shot dossier generator has been retired. Use{" "}
+        <Link href="/dossier-v2" className="font-semibold underline hover:text-white">
+          Research Dossier v2
+        </Link>{" "}
+        for evidence-grounded analysis.
+      </div>
+
       {/* Interactive LLM Concept Refinement Bar */}
       {dossier && (
         <div className="mb-6 rounded-xl bg-void-card border border-void-border p-2 sm:p-2.5 shadow-lg flex items-center gap-2">

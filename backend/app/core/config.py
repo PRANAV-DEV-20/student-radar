@@ -29,12 +29,69 @@ class Settings(BaseSettings):
     ENABLE_CELERY_DISPATCH: bool = False
 
     # AI & Search
+    # The 2.5 model names below are retained only for legacy services. Live
+    # probes (2026-11-24) returned 404 "no longer available to new users" for
+    # gemini-2.5-flash / 2.5-pro; Dossier v2 therefore pins a working model and
+    # an explicit fallback chain. Do not change these to a model that has not
+    # been probed with the configured key.
     GEMINI_API_KEY: Optional[str] = None
-    GEMINI_TEXT_MODEL: str = "gemini-2.5-flash"
-    GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
+    # Live probes on 2026-11-24: 3.5/3.6 flash returned 429 quota exhaustion,
+    # 3.8 flash returned 503 high demand. These models returned real JSON with
+    # stable token counts: 3-flash-preview (reasoning), 3.5-flash-lite (fast),
+    # 3.1-flash-lite and flash-lite-latest. The critic uses the reasoning model;
+    # bulk extraction/synthesis uses the fast model, with a reasoning fallback.
+    GEMINI_TEXT_MODEL: str = "gemini-3.5-flash-lite"
+    GEMINI_CRITIC_MODEL: str = "gemini-3-flash-preview"
+    GEMINI_SMALL_MODEL: str = "gemini-3.5-flash-lite"
+    # Exclude models that returned 429 quota exhaustion or 503 high demand
+    # during the real-run probe. Each remaining id returned real JSON.
+    GEMINI_MODEL_FALLBACKS: tuple[str, ...] = (
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+        "gemini-flash-lite-latest",
+        "gemini-3-flash-preview",
+    )
+    GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-001"
     GEMINI_EMBEDDING_DIMENSIONS: int = 768
+    # Groq is the primary fast/cheap JSON planner for Concept Normalization and
+    # the Radar relevance gatekeeper. The model ids below were probed with a
+    # live key on 2026-11-24 and support OpenAI-compatible JSON mode.
+    GROQ_API_KEY: Optional[str] = None
+    GROQ_MODEL: str = "qwen/qwen3.8-27b"
+    GROQ_MODEL_FALLBACKS: tuple[str, ...] = ("openai/gpt-oss-20b", "allam-2-7b")
     TAVILY_API_KEY: Optional[str] = None
     EXA_API_KEY: Optional[str] = None
+    GITHUB_TOKEN: Optional[str] = None  # optional: raises GitHub API rate limit
+
+    # Dossier v2 research pipeline
+    DOSSIER_V2_ENABLED: bool = True
+    DOSSIER_V2_RETRIEVAL_TIMEOUT_SECONDS: float = 20.0
+    DOSSIER_V2_SECTION_TIMEOUT_SECONDS: float = 45.0
+    DOSSIER_V2_LLM_TIMEOUT_SECONDS: float = 25.0
+    DOSSIER_V2_MAX_REPAIRS: int = 1
+    DOSSIER_V2_MAX_SECTION_WORKERS: int = 5
+    DOSSIER_V2_MAX_QUESTION_WORKERS: int = 6
+    # Free-tier providers cannot serve 18 independent section calls in a burst.
+    # Sections are written in small batches with a hard overall deadline.
+    DOSSIER_V2_SECTION_BATCH_SIZE: int = 3
+    DOSSIER_V2_RUN_TIMEOUT_SECONDS: float = 220.0
+    # Dossier-specific model order. Live probes on 2026-11-25 showed 3-flash-preview
+    # quota-limited; 3.1-flash-lite became healthy again after the earlier 503
+    # burst, so it is retained as the third Gemini option. The generic legacy
+    # fallback list is deliberately not used here.
+    DOSSIER_V2_MODEL_CHAIN: tuple[str, ...] = (
+        "gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.1-flash-lite",
+    )
+    DOSSIER_V2_CRITIC_MODEL_CHAIN: tuple[str, ...] = (
+        "gemini-flash-lite-latest", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite",
+    )
+    # USD per 1M tokens; used for per-run cost estimates shown to reviewers.
+    DOSSIER_V2_PRICE_PER_M_INPUT_USD: float = 0.30
+    DOSSIER_V2_PRICE_PER_M_OUTPUT_USD: float = 2.50
+    # Groq public pricing for openai/gpt-oss-20b (console.groq.com/docs/models).
+    DOSSIER_V2_GROQ_PRICE_PER_M_INPUT_USD: float = 0.075
+    DOSSIER_V2_GROQ_PRICE_PER_M_OUTPUT_USD: float = 0.30
+    DOSSIER_V2_GROQ_MODEL: str = "openai/gpt-oss-20b"
 
     # External market intelligence (cross-platform signal collection)
     ENABLE_EXTERNAL_INTELLIGENCE: bool = True
@@ -65,10 +122,43 @@ class Settings(BaseSettings):
     RADAR_TAVILY_INCLUDE_PUBLISHED_DATE: bool = True
     RADAR_RERANK_THRESHOLD: int = 65
     RADAR_SCAN_LANGUAGE: str = "en"
-    RADAR_ON_DEMAND_MAX_INTENTS: int = 3
+    RADAR_ON_DEMAND_MAX_INTENTS: int = 5
     RADAR_ENABLE_DIRECT_SOURCES: bool = True
     RADAR_DIRECT_SOURCE_TIMEOUT_SECONDS: float = 10.0
     RADAR_DIRECT_SOURCE_LIMIT: int = 20
+
+    # Concept-normalized Radar search (Tavily 4-bucket blueprint).
+    RADAR_EVENT_DOMAINS: tuple[str, ...] = (
+        "devpost.com",
+        "devfolio.co",
+        "unstop.com",
+        "dorahacks.io",
+        "lu.ma",
+        "mlh.io",
+        "hackerearth.com",
+    )
+    RADAR_OPPORTUNITY_DOMAINS: tuple[str, ...] = (
+        "ycombinator.com",
+        "techstars.com",
+        "grants.gov",
+        "f6s.com",
+        "startupindia.gov.in",
+        "birac.nic.in",
+        "producthunt.com",
+    )
+    RADAR_TREND_DAYS: int = 180
+    RADAR_NEWS_DAYS: int = 30
+    RADAR_OPPORTUNITY_DAYS: int = 60
+    RADAR_TAVILY_MIN_SCORE: float = 0.60
+    # Open-web trend/news scores sit on a lower scale than the general gate.
+    # Keep enough candidates alive for the strict LLM relevance gate to judge.
+    RADAR_TAVILY_SIGNAL_MIN_SCORE: float = 0.45
+    # Tavily scores domain-locked (events / grants) results on a different
+    # scale than open-web results. A lower provider gate keeps genuine portal
+    # hits alive; the LLM gatekeeper below is the strict relevance filter.
+    RADAR_TAVILY_DOMAIN_MIN_SCORE: float = 0.30
+    RADAR_LLM_MIN_SCORE: int = 60
+    RADAR_INTEL_MAX_RESULTS: int = 8
 
     # Security & Auth
     JWT_SECRET: str = "super_secret_jwt_key_for_development_purposes_only_change_in_production"
@@ -123,7 +213,13 @@ class Settings(BaseSettings):
     R2_PUBLIC_DOMAIN: str = "https://assets.studentradar.dev"
 
     # CORS
-    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+    CORS_ORIGINS: str = (
+        "http://localhost:3000,http://127.0.0.1:3000,"
+        "http://localhost:3001,http://127.0.0.1:3001,"
+        "http://localhost:3002,http://127.0.0.1:3002,"
+        "http://localhost:3003,http://127.0.0.1:3003,"
+        "http://localhost:3200,http://127.0.0.1:3200"
+    )
 
     model_config = SettingsConfigDict(
         # Support both ``backend/.env`` and a repository-root ``.env`` while
@@ -140,6 +236,25 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.APP_ENV.strip().lower() in {"production", "prod"}
+
+    @property
+    def gemini_configured(self) -> bool:
+        key = (self.GEMINI_API_KEY or "").strip()
+        return bool(key) and key not in {
+            "your_gemini_api_key_here", "changeme", "xxx", "placeholder",
+        }
+
+    @property
+    def groq_configured(self) -> bool:
+        key = (self.GROQ_API_KEY or "").strip()
+        return bool(key) and key not in {
+            "your_groq_api_key_here", "changeme", "xxx", "placeholder",
+        }
+
+    @property
+    def llm_configured(self) -> bool:
+        """True only when at least one real provider key is present."""
+        return self.gemini_configured or self.groq_configured
 
 
 settings = Settings()

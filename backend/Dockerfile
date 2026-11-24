@@ -2,14 +2,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system build dependencies for pgvector/psycopg2 and Pillow
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
-    curl \
-    git \
-    && rm -rf /var/lib/apt/lists/*
-
+# Every dependency ships a CPython 3.11 Linux wheel (psycopg2-binary, Pillow,
+# PyMuPDF, cryptography, ...), so no compiler toolchain or Debian mirror is
+# needed. Health checks use Python's urllib, not curl.
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

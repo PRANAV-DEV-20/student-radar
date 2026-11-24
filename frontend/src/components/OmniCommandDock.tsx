@@ -170,14 +170,14 @@ export function OmniCommandDock({ onIngestComplete }: OmniCommandDockProps) {
                   ? "Describe your project concept, problem statement, or technical vision (e.g., 'An AI interview coach with real-time speech feedback and behavioral rubrics for students')..."
                   : "Paste your research paper abstract or technical concept..."
               }
-              className="w-full bg-void/50 rounded-xl border border-void-border/80 p-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-horizon-indigo resize-none leading-relaxed font-sans"
+              className="w-full bg-void/50 rounded-xl border border-void-border/80 p-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-horizon-indigo resize-y leading-relaxed font-sans"
             />
           </div>
 
           {/* Action Row */}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-[11px] text-gray-400 font-mono">
-              ⚡ Turns ideas into verified Dossiers + PR Kits in &lt; 2 seconds
+              ⚡ No character limit — paste as much as you like
             </span>
 
             <button

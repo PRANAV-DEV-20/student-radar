@@ -33,6 +33,8 @@ services:
         sync: false
       - key: TAVILY_API_KEY
         sync: false
+      - key: GROQ_API_KEY
+        sync: false
       - key: EXA_API_KEY
         sync: false
       - key: JWT_SECRET

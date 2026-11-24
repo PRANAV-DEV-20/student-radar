@@ -46,7 +46,19 @@ class GeminiService:
         domain_persona: str,
         input_type: str = "idea",
     ) -> Dict[str, Any]:
-        """Extract a publication-grade dossier using Gemini structured output."""
+        """Extract a dossier using Gemini structured output.
+
+        Retired behaviour: when Gemini failed, the old generator returned the
+        deterministic heuristic dossier. That path is removed. The heuristic
+        result below is only a neutral, input-grounded schema base used to fill
+        optional keys of a successful model response; it is never returned in
+        place of a real model result.
+        """
+        if not settings.llm_configured:
+            raise RuntimeError(
+                "AI provider not configured. Deterministic dossier generation has been "
+                "retired; use /api/v1/dossiers/v2/runs instead."
+            )
         fallback = self._fallback_dossier_synthesis(raw_content, domain_persona, input_type)
 
         system_instruction = (
@@ -73,9 +85,19 @@ class GeminiService:
                 if isinstance(parsed, dict) and parsed:
                     return self._normalize_dossier(parsed, fallback)
             except Exception as exc:  # pragma: no cover - network dependent
-                logger.warning(f"Gemini API call failed, falling back to heuristic engine: {exc}")
-
-        return fallback
+                logger.warning("Gemini dossier synthesis failed: %s", exc)
+                raise RuntimeError(
+                    "AI provider unavailable. Deterministic template output is disabled; "
+                    "use /api/v1/dossiers/v2/runs instead."
+                ) from exc
+            raise RuntimeError(
+                "AI provider unavailable. Deterministic template output is disabled; "
+                "use /api/v1/dossiers/v2/runs instead."
+            )
+        raise RuntimeError(
+            "AI provider client unavailable. Deterministic template output is disabled; "
+            "use /api/v1/dossiers/v2/runs instead."
+        )
 
     async def generate_structured_benchmark(
         self,

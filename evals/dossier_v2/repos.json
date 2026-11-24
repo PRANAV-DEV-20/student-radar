@@ -1,0 +1,32 @@
+[
+  {
+    "url": "https://github.com/fastapi/fastapi",
+    "domain_persona": "tech_builder",
+    "why": "Mature Python API framework with extensive tests, CI, docs and releases; strong control for code-grounded maturity and licence checks.",
+    "expected_signals": ["lib", "python", "tests_detected", "ci_detected", "MIT licence"]
+  },
+  {
+    "url": "https://github.com/pytorch/pytorch",
+    "domain_persona": "tech_builder",
+    "why": "Large ML framework where README performance claims must be checked against evaluation artifacts and benchmark baselines.",
+    "expected_signals": ["python", "cuda", "benchmarks", "BSD-style licence"]
+  },
+  {
+    "url": "https://github.com/huggingface/transformers",
+    "domain_persona": "tech_builder",
+    "why": "Model/library ecosystem with model cards and dataset docs; useful for licence and dataset-lineage checks.",
+    "expected_signals": ["model cards", "datasets", "Apache-2.0 licence", "tests"]
+  },
+  {
+    "url": "https://github.com/langchain-ai/langchain",
+    "domain_persona": "tech_builder",
+    "why": "Fast-moving LLM orchestration repo where related-work retrieval and novelty language must be restrained.",
+    "expected_signals": ["llm", "packages", "docs", "MIT licence"]
+  },
+  {
+    "url": "https://github.com/opencv/opencv",
+    "domain_persona": "design_biotech",
+    "why": "Computer-vision library useful for the leaf-disease idea: it should appear as real related work, not as fabricated prior art.",
+    "expected_signals": ["C++", "Python", "computer vision", "Apache-2.0 licence"]
+  }
+]

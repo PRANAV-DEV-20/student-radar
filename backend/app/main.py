@@ -1,3 +1,4 @@
+import json
 import logging
 from contextlib import asynccontextmanager
 
@@ -11,6 +12,7 @@ from app.api.v1 import (
     auth,
     credits,
     dossiers,
+    dossiers_v2,
     matchmaking,
     network,
     openai_compat,
@@ -109,6 +111,29 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("Could not connect to database on startup: %s. Will reconnect on demand.", exc)
 
+    # A worker killed mid-run used to leave the row in "running" forever.
+    # Reconcile old rows on startup so the UI never shows a stuck dossier.
+    try:
+        async with engine.begin() as conn:
+            stale = await conn.execute(
+                text("""
+                    update dossier_runs
+                       set status = 'failed',
+                           error = :error,
+                           finished_at = now()
+                     where status = 'running'
+                       and created_at < now() - interval '10 minutes'
+                """),
+                {"error": json.dumps({
+                    "code": "RUN_INTERRUPTED",
+                    "message": "Run did not reach a terminal state before the worker stopped.",
+                })},
+            )
+            if stale.rowcount:
+                logger.warning("Marked %s stale dossier run(s) as failed", stale.rowcount)
+    except Exception as exc:
+        logger.warning("Could not reconcile stale dossier runs: %s", exc)
+
     yield
     logger.info("Shutting down Student Radar Engine...")
 
@@ -127,9 +152,16 @@ app = FastAPI(
 
 # CORS: wildcard origins cannot be combined with credentials in browsers.
 _allow_credentials = "*" not in settings.cors_origin_list
+# Next dev servers can move between 3000-3003 (and Docker uses 3200). In local
+# development only, accept any loopback origin so a port change cannot surface
+# as `TypeError: Failed to fetch`. Production still uses the explicit list.
+_local_origin_regex = (
+    None if settings.is_production else r"http://(?:localhost|127\.0\.0\.1):\d+"
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
+    allow_origin_regex=_local_origin_regex,
     allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -139,6 +171,7 @@ app.add_middleware(
 # Register API v1 Routers
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(dossiers.router, prefix="/api/v1")
+app.include_router(dossiers_v2.router, prefix="/api/v1")
 app.include_router(pr.router, prefix="/api/v1")
 app.include_router(radar.router, prefix="/api/v1")
 app.include_router(network.router, prefix="/api/v1")

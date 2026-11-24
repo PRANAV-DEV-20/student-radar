@@ -7,6 +7,15 @@ from app.models.opportunity import Opportunity
 from app.models.briefing import UserBriefing
 from app.models.network import ReferralInvite, SuppressedEmail
 from app.models.credit import CreditTransaction
+from app.models.dossier_v2 import (
+    AIRun,
+    DossierRun,
+    DossierSection,
+    DossierSource,
+    DossierVersion,
+    Evidence,
+    SectionReview,
+)
 
 __all__ = [
     "User",
@@ -19,4 +28,11 @@ __all__ = [
     "ReferralInvite",
     "SuppressedEmail",
     "CreditTransaction",
+    "AIRun",
+    "DossierRun",
+    "DossierSection",
+    "DossierSource",
+    "DossierVersion",
+    "Evidence",
+    "SectionReview",
 ]

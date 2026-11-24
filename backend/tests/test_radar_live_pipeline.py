@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 
 import app.services.gemini_client as gemini_module
+import app.services.radar_intel as intel_module
 import app.services.radar_live_service as live_module
 from app.api.v1.radar import router as radar_router
 from app.core.config import settings
@@ -124,6 +125,57 @@ def test_tavily_intent_search_sends_advanced_recency_params(monkeypatch):
     asyncio.run(service.search_for_intent("water launch", intent="news"))
     assert captured["topic"] == "news"
     assert captured["time_range"] == settings.RADAR_TAVILY_NEWS_TIME_RANGE
+
+
+def test_signal_search_uses_public_rss_when_tavily_is_unavailable(monkeypatch):
+    profile = {
+        "project_title": "offline AI crop disease detector",
+        "core_domain": "crop disease detection",
+        "problem_statement": "detect crop disease offline for smallholder farmers",
+        "target_audience": "smallholder farmers",
+        "core_entities": ["offline crop disease detection", "smallholder farmers"],
+        "tech_stack": ["PyTorch", "edge AI"],
+        "radar_queries": {
+            "trends": "edge AI agriculture market growth trends adoption 2026",
+            "news": "crop disease detection PyTorch edge AI breakthrough launch",
+        },
+    }
+
+    async def fake_tavily(*args, **kwargs):
+        raise RuntimeError("HTTP 432")
+
+    async def fake_rss(client, plan, profile, limit):
+        if plan["bucket"] not in {"trends", "news"}:
+            return []
+        return [
+            {
+                "title": "Crop disease detection with edge AI",
+                "url": f"https://news.example.com/{plan['bucket']}",
+                "content": "offline crop disease detection for smallholder farmers",
+                "published_date": "",
+                "score": settings.RADAR_TAVILY_SIGNAL_MIN_SCORE,
+                "provider": "google_news_rss",
+            }
+        ]
+
+    async def fake_verify(items, profile, language):
+        for item in items:
+            item["why_this_fits"] = "Directly covers crop disease detection for smallholder farmers."
+            item["relevance_score_100"] = 80
+        return items, 0
+
+    monkeypatch.setattr(settings, "TAVILY_API_KEY", "tvly-test")
+    monkeypatch.setattr(intel_module, "_tavily_search", fake_tavily)
+    monkeypatch.setattr(intel_module, "_rss_search", fake_rss)
+    monkeypatch.setattr(intel_module, "_verify_items", fake_verify)
+
+    result = asyncio.run(intel_module.search_concept_intel(profile, language="en"))
+
+    assert sorted(item["bucket"] for item in result.items) == ["news", "trends"]
+    assert all(item["provider"] == "google_news_rss" for item in result.items)
+    signal_sources = [source for source in result.sources if source["source"].startswith("google_news_rss_")]
+    assert len(signal_sources) == 2
+    assert "Why it fits" in result.note or "Google News RSS" in result.note
 
 
 class FakeResult:

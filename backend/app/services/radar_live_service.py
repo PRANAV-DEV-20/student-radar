@@ -8,11 +8,12 @@ only meant for manual verification are never inserted into the Radar feed.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 import urllib.parse
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
 from sqlalchemy import select
@@ -22,10 +23,16 @@ from app.core.config import settings
 from app.models.dossier import ProjectDossier
 from app.models.opportunity import Opportunity
 from app.schemas.signals import MarketSignal
+from app.services.concept_normalizer import build_concept_profile
 from app.services.external_intelligence import external_intelligence
 from app.services.gemini_client import gemini_service
 from app.services.opportunity_discovery import deduplicate_candidates, discover_opportunities
 from app.services.radar_engine import PERSONA_LABELS
+from app.services.radar_intel import (
+    explain_candidates,
+    filter_market_signals,
+    search_concept_intel,
+)
 
 RADAR_INTENTS: tuple[str, ...] = ("hackathons", "news", "builders")
 
@@ -55,10 +62,24 @@ _VERIFICATION_MARKERS = (
 )
 
 _DEADLINE_HINT = re.compile(
-    r"(?:deadline|closes?|apply by|registration ends?|last date|submissions? close)",
+    r"(?:deadline|closes?|closing|apply by|registration ends?|last date|"
+    r"submissions? close|applications? close|register by|entries close)",
     re.IGNORECASE,
 )
 _ISO_DATE = re.compile(r"\b(20\d{2}-\d{2}-\d{2})\b")
+_MONTH_DATE = re.compile(
+    r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+    r"jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|"
+    r"dec(?:ember)?)\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+20\d{2}\b",
+    re.IGNORECASE,
+)
+_NUMERIC_DATE = re.compile(r"\b\d{1,2}/\d{1,2}/20\d{2}\b")
+_MONTHS = {
+    "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
+    "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6, "jul": 7, "july": 7,
+    "aug": 8, "august": 8, "sep": 9, "sept": 9, "september": 9, "oct": 10,
+    "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12,
+}
 
 _REWARD_PATTERN = re.compile(
     r"(?:US)?\$\s?[\d,.]+(?:\s?(?:k|m|million|stipend))?", re.IGNORECASE
@@ -91,18 +112,63 @@ def _parse_date(value: Any) -> Optional[datetime]:
     return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
 
 
-def _explicit_deadline(text: str) -> Optional[datetime]:
-    """Read a deadline only when the snippet says so and gives an ISO date."""
+def _parse_natural_date(value: str) -> Optional[datetime]:
+    """Parse the date formats real event snippets actually use."""
 
-    if not _DEADLINE_HINT.search(text or ""):
+    raw = value.strip().rstrip(".,")
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        parsed = None
+    if parsed is None:
+        month_match = re.match(
+            r"([A-Za-z]+)\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(20\d{2})", raw
+        )
+        if month_match:
+            month = _MONTHS.get(month_match.group(1).lower().rstrip("."))
+            if month:
+                try:
+                    parsed = datetime(int(month_match.group(3)), month, int(month_match.group(2)))
+                except ValueError:
+                    parsed = None
+        if parsed is None and re.fullmatch(r"\d{1,2}/\d{1,2}/20\d{2}", raw):
+            month, day, year = (int(part) for part in raw.split("/"))
+            try:
+                parsed = datetime(year, month, day)
+            except ValueError:
+                parsed = None
+    if parsed is None:
         return None
-    match = _ISO_DATE.search(text or "")
-    if not match:
-        return None
-    parsed = _parse_date(match.group(1))
-    if parsed and parsed.time() == datetime.min.time():
+    parsed = parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
+    if parsed.time() == datetime.min.time():
         parsed = parsed.replace(hour=23, minute=59)
-    return parsed if parsed and parsed > datetime.now(timezone.utc) else None
+    return parsed
+
+
+def _explicit_deadline(text: str) -> Optional[datetime]:
+    """Read a deadline only when the snippet says so AND gives a real date.
+
+    Deadlines appear as ``2026-12-01``, ``December 1, 2026``, ``1 Dec 2026``
+    or ``12/01/2026`` in live search snippets. Accepting all of them (with a
+    deadline hint next to the date) is what lets real hackathons and grants
+    survive into the Radar feed without inferring anything.
+    """
+
+    content = text or ""
+    hints = list(_DEADLINE_HINT.finditer(content))
+    if not hints:
+        return None
+    dated: List[tuple[int, datetime]] = []
+    for pattern in (_ISO_DATE, _MONTH_DATE, _NUMERIC_DATE):
+        for match in pattern.finditer(content):
+            parsed = _parse_natural_date(match.group(0))
+            if parsed and parsed > datetime.now(timezone.utc):
+                dated.append((match.start(), parsed))
+    for hint in hints:
+        for position, parsed in dated:
+            if abs(position - hint.start()) <= 200:
+                return parsed
+    return None
 
 
 def _host(url: str) -> str:
@@ -260,34 +326,40 @@ def _to_opportunity_candidate(
     reward_match = _REWARD_PATTERN.search(summary)
     url = str(item.get("url") or "")
     source_host = _host(url)
+    event_date = item.get("event_date")
     return {
         "title": str(item.get("title") or "")[:250],
-        "category": _infer_category(str(item.get("title") or ""), summary),
+        "category": str(item.get("category") or "").strip()
+        or _infer_category(str(item.get("title") or ""), summary),
         "canonical_source_url": url,
-        "host_organization": source_host or None,
+        "host_organization": item.get("host_organization") or source_host or None,
         "deadline": deadline,
+        "event_date": event_date.date() if isinstance(event_date, datetime) else event_date,
         "description": summary[:4000] or str(item.get("title") or "Live Radar result"),
         "tags": list(tags[:6]),
         "domain_personas": [persona],
         "location_type": "virtual",
-        "reward_pool": reward_match.group(0) if reward_match else None,
+        "reward_pool": item.get("reward_pool") or (reward_match.group(0) if reward_match else None),
         "decision_metadata": {
-            "source": "search_result",
-            "source_label": source_host or "Web search",
-            "source_kind": "search_result",
-            "verification": "verify_on_official_page",
-            "is_official": False,
+            "source": item.get("source") or "search_result",
+            "source_label": item.get("source_label") or source_host or "Web search",
+            "source_kind": item.get("source_kind") or "search_result",
+            "verification": item.get("verification") or "verify_on_official_page",
+            "is_official": bool(item.get("is_official", False)),
             "is_live": True,
             "deadline_inferred": False,
-            "deadline_basis": "explicit_deadline",
-            "radar_intent": item.get("intent"),
+            "deadline_basis": item.get("date_basis") or "explicit_deadline",
+            "radar_intent": item.get("intent") or item.get("bucket"),
             "generated_query": item.get("generated_query"),
             "relevance_score_100": item.get("relevance_score_100", 0),
-            "rerank_reason": item.get("rerank_reason", ""),
+            "match_score": round(min(1.0, item.get("relevance_score_100", 0) / 100), 2),
+            "matched_terms": list(item.get("matched_terms") or []),
+            "why_this_fits": item.get("why_this_fits") or "",
+            "rerank_reason": item.get("rerank_reason") or item.get("why_this_fits") or "",
             "language": item.get("language"),
             "published_at": item.get("published_at").isoformat()
-            if item.get("published_at")
-            else None,
+            if isinstance(item.get("published_at"), datetime)
+            else item.get("published_at"),
             "scanned_at": scanned_at.isoformat(),
         },
     }
@@ -405,22 +477,23 @@ async def scan_live(
     started = datetime.now(timezone.utc)
     selected = [intent for intent in RADAR_INTENTS if intent in set(intents)] or list(RADAR_INTENTS)
     context = build_project_context(dossier, raw_idea, persona)
+
+    # Stage 2: messy idea -> structured, keyword-dense concept profile.
+    profile = await build_concept_profile(context, language)
     queries = await gemini_service.generate_radar_queries(context, language)
-    keywords = list(context.get("tech_stack") or [])
+    keywords = list(
+        dict.fromkeys(
+            [
+                *(str(item) for item in (profile.get("core_entities") or [])),
+                *(str(item) for item in (context.get("tech_stack") or [])),
+            ]
+        )
+    )[:8]
 
-    # Retrieval-first path: platform adapters turn the idea into real,
-    # source-linked records before any ranking or copy is generated.
-    discovery = await discover_opportunities(
-        raw_idea=str(context.get("raw_idea") or context.get("summary") or ""),
-        persona=persona,
-    )
-
-    results: List[IntentScanResult] = []
-    all_signals: List[MarketSignal] = []
-    candidates: List[Dict[str, Any]] = list(discovery.candidates)
-
-    for intent in selected:
-        scan_result = await collect_intent_candidates(
+    # Stage 3: run direct platform adapters, the 4-bucket Tavily search, and the
+    # legacy intent scans together. A failure in one path cannot block the rest.
+    async def legacy_scan(intent: str) -> IntentScanResult:
+        return await collect_intent_candidates(
             context=context,
             persona=persona,
             intent=intent,
@@ -429,8 +502,92 @@ async def scan_live(
             max_age_hours=max_age_hours,
             keywords=keywords,
         )
-        results.append(scan_result)
-        all_signals.extend(scan_result.signals)
+
+    outcomes = await asyncio.gather(
+        discover_opportunities(
+            raw_idea=str(context.get("raw_idea") or context.get("summary") or ""),
+            persona=persona,
+        ),
+        search_concept_intel(profile, language=language),
+        *(legacy_scan(intent) for intent in selected),
+        return_exceptions=True,
+    )
+
+    from types import SimpleNamespace
+
+    discovery = outcomes[0] if not isinstance(outcomes[0], Exception) else SimpleNamespace(
+        candidates=[], sources=[], query="", source_payload=lambda: []
+    )
+    intel = outcomes[1] if not isinstance(outcomes[1], Exception) else None
+    results = [item for item in outcomes[2:] if isinstance(item, IntentScanResult)]
+
+    all_signals: List[MarketSignal] = []
+    candidates: List[Dict[str, Any]] = list(discovery.candidates)
+
+    # Concept-normalized intel: actionable buckets become source-backed cards
+    # only when a deadline or dated event was explicitly stated in the result.
+    if intel is not None:
+        for item in intel.items:
+            bucket = str(item.get("bucket") or "")
+            if bucket in {"news", "trends"}:
+                all_signals.append(
+                    MarketSignal(
+                        id=f"radar-intel-{item['id']}",
+                        source="news",
+                        signal_type="trend" if bucket == "trends" else "news",  # type: ignore[arg-type]
+                        title=str(item.get("title") or "")[:250],
+                        summary=(
+                            f"{item.get('snippet','')[:1200]} "
+                            f"Why it fits: {item.get('why_this_fits','')[:240]}"
+                        ).strip(),
+                        url=str(item.get("url") or ""),
+                        published_at=item.get("published_at"),
+                        relevance_score=round(
+                            min(1.0, item.get("relevance_score_100", 0) / 100), 2
+                        ),
+                        keywords=list(item.get("matched_terms") or keywords[:5])[:5],
+                        is_live=True,
+                        radar_intent="news",
+                    )
+                )
+                continue
+            if bucket not in {"events", "opportunities"} or not item.get("deadline"):
+                continue
+            blob = f"{item.get('title','')} {item.get('snippet','')}".lower()
+            if bucket == "opportunities":
+                category = "grant" if any(
+                    word in blob
+                    for word in ("grant", "funding", "fellowship", "accelerator", "stipend")
+                ) else "general_event"
+            elif any(word in blob for word in ("hackathon", "buildathon", "build sprint", "hack")):
+                category = "hackathon"
+            else:
+                category = "general_event"
+            candidate = _to_opportunity_candidate(
+                {
+                    **item,
+                    "summary": item.get("snippet") or "",
+                    "category": category,
+                    "source": "tavily_search",
+                    "source_label": f"Tavily · {bucket}",
+                    "source_kind": "search_result",
+                    "verification": "verify_on_official_page",
+                },
+                persona=persona,
+                tags=keywords or [persona],
+                scanned_at=started,
+            )
+            if candidate:
+                candidates.append(candidate)
+
+    # Legacy intent scans also emit news/trend signals. They must satisfy the
+    # same concept gate and carry a Why it fits line before reaching the UI.
+    legacy_signals = [
+        signal for scan_result in results for signal in scan_result.signals
+    ]
+    all_signals.extend(filter_market_signals(legacy_signals, profile))
+
+    for scan_result in results:
         for item in scan_result.items:
             candidate = _to_opportunity_candidate(
                 item,
@@ -442,6 +599,10 @@ async def scan_live(
                 candidates.append(candidate)
 
     candidates = deduplicate_candidates(candidates)
+    # Stage 4: tie every surviving card back to the user's idea in one sentence
+    # and discard listings that do not genuinely connect to the idea.
+    explained = await explain_candidates(candidates, profile, language=language)
+    candidates = explained.candidates
 
     upsert_result: Dict[str, int] = {"inserted": 0, "merged": 0, "skipped": 0}
     if candidates:
@@ -463,43 +624,72 @@ async def scan_live(
     briefing = build_briefing(opportunity_rows, persona, dossier=dossier)
 
     direct_raw = sum(source.raw_count for source in discovery.sources)
-    direct_accepted = len(discovery.candidates)
-    total_raw = direct_raw + sum(item.raw_count for item in results)
-    total_accepted = direct_accepted + sum(item.accepted_count for item in results)
-    status = "ok" if total_raw or direct_accepted else "empty"
+    direct_accepted = sum(
+        1
+        for candidate in candidates
+        if str((candidate.get("decision_metadata") or {}).get("source_kind") or "")
+        == "public_api"
+    )
+    intel_raw = intel.raw_count if intel is not None else 0
+    intel_gated = intel.gated_count if intel is not None else 0
+    intel_accepted = intel.accepted_count if intel is not None else 0
+    total_raw = direct_raw + intel_raw + sum(item.raw_count for item in results)
+    total_accepted = len(candidates)
+    status = "ok" if total_raw or total_accepted else "empty"
+
+    query_plans: List[Dict[str, Any]] = [
+        {
+            "intent": "opportunities",
+            "query": discovery.query,
+            "raw_results": direct_raw,
+            "actionable_after_gatekeeper": len(discovery.candidates),
+            "accepted": direct_accepted,
+            "note": (
+                "Direct platform adapters: Devpost, MLH, Unstop, Luma, Grants.gov, "
+                "Commudle discovery, Hackalendar. "
+                + (explained.note or "")
+            ).strip(),
+        }
+    ]
+    if intel is not None:
+        query_plans.extend(intel.plans)
+    query_plans.extend(
+        {
+            "intent": item.intent,
+            "query": item.query,
+            "raw_results": item.raw_count,
+            "actionable_after_gatekeeper": item.gated_count,
+            "accepted": item.accepted_count,
+            "note": item.note,
+        }
+        for item in results
+    )
+
+    sources = list(discovery.source_payload())
+    if intel is not None:
+        sources.extend(intel.sources)
+
     return {
         "status": status,
         "persona": persona,
         "language": language,
         "max_age_hours": max_age_hours,
-        "queries": [
-            {
-                "intent": "opportunities",
-                "query": discovery.query,
-                "raw_results": direct_raw,
-                "actionable_after_gatekeeper": direct_raw,
-                "accepted": direct_accepted,
-                "note": "Direct platform adapters: Devpost, MLH, Unstop, Luma, Grants.gov, Commudle discovery, Hackalendar.",
-            }
-        ] + [
-            {
-                "intent": item.intent,
-                "query": item.query,
-                "raw_results": item.raw_count,
-                "actionable_after_gatekeeper": item.gated_count,
-                "accepted": item.accepted_count,
-                "note": item.note,
-            }
-            for item in results
-        ],
-        "sources": discovery.source_payload(),
+        "concept_profile": profile,
+        "radar_queries": profile.get("radar_queries") or {},
+        "queries": query_plans,
+        "sources": sources,
         "stats": {
             "raw_results": total_raw,
-            "actionable_after_gatekeeper": direct_raw + sum(item.gated_count for item in results),
+            "actionable_after_gatekeeper": direct_raw + intel_gated + sum(item.gated_count for item in results),
             "accepted": total_accepted,
             "rejected": max(0, total_raw - total_accepted),
             "opportunities_inserted": upsert_result["inserted"],
             "opportunities_merged": upsert_result["merged"],
+            "relevance_filtered": explained.rejected_count,
+            "llm_verified": (
+                (intel.llm_verified_count if intel is not None else 0)
+                + explained.llm_verified_count
+            ),
             "duration_ms": int(
                 (datetime.now(timezone.utc) - started).total_seconds() * 1000
             ),

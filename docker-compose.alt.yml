@@ -1,0 +1,68 @@
+# Alternate-port local stack for when another service already owns
+# 8000 / 3000 / 5432 / 6379 on the host.
+#
+#   docker compose -f docker-compose.alt.yml up -d --build
+#
+# Postgres, Redis and the frontend run in Docker. The FastAPI backend runs from
+# host Python on port 8100 (see DEPLOYMENT.md) so no Docker image build is
+# required — useful when the Debian/PyPI mirrors are unreachable from Docker.
+#
+#   Frontend: http://localhost:3200
+#   API:      http://localhost:8100/api/v1
+#
+# NEXT_PUBLIC_API_URL is baked into the frontend bundle at build time, so it is
+# supplied as a build arg AND as a runtime env var. The host API must allow the
+# 3200 origin via CORS_ORIGINS or the browser reports `TypeError: Failed to fetch`.
+
+name: student-radar-alt
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: student_radar_postgres_alt
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-radar_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-radar_secret_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-student_radar_db}
+    ports:
+      - "55433:5432"
+    volumes:
+      - postgres_data_alt:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-radar_admin} -d ${POSTGRES_DB:-student_radar_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: student_radar_redis_alt
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data_alt:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8100/api/v1
+    container_name: student_radar_frontend_alt
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8100/api/v1
+      NEXT_PUBLIC_APP_URL: http://localhost:3200
+    ports:
+      - "3200:3000"
+
+volumes:
+  postgres_data_alt:
+  redis_data_alt:

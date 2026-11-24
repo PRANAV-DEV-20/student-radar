@@ -149,27 +149,15 @@ async def ingest_artifact(
     current_user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Ingests an idea, GitHub repo, Figma link, or extracted PDF text, runs
-    structured extraction + Trend Scout + embeddings, and returns a public
-    Proof-of-Work Dossier.
-    """
-    guest_id = None if current_user else _guest_id(x_guest_session_id)
-
-    dossier_data = await ingestion_agent.process_artifact(
-        input_type="pdf_text" if req.input_type == "pdf" else req.input_type,
-        raw_content=req.raw_content,
-        domain_persona=req.domain_persona,
-    )
-
-    return await _persist_new_dossier(
-        dossier_data=dossier_data,
-        req_persona=req.domain_persona,
-        current_user=current_user,
-        guest_id=guest_id,
-        raw_content=req.raw_content,
-        input_type=req.input_type,
-        db=db,
+    """Retired: the deterministic single-shot dossier generator is removed."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "code": "LEGACY_DOSSIER_GENERATOR_RETIRED",
+            "message": "The deterministic single-shot dossier generator has been removed. "
+                       "Use the evidence-grounded Dossier v2 pipeline instead.",
+            "use": "/api/v1/dossiers/v2/runs",
+        },
     )
 
 
@@ -186,40 +174,14 @@ async def ingest_pdf_file(
     current_user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
-    guest_id = None if current_user else _guest_id(x_guest_session_id)
-    persona = (domain_persona or settings.DEFAULT_PERSONA).strip().lower()
-    if persona not in settings.KNOWN_PERSONAS:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "Unsupported domain_persona. Choose one of: "
-                + ", ".join(settings.KNOWN_PERSONAS)
-            ),
-        )
-
-    content_type = (file.content_type or "").lower()
-    filename = (file.filename or "").lower()
-    if content_type not in {"application/pdf", "application/octet-stream"} and not filename.endswith(".pdf"):
-        raise HTTPException(status_code=415, detail="Only PDF uploads are supported.")
-
-    payload = await file.read()
-    if not payload:
-        raise HTTPException(status_code=400, detail="Uploaded PDF is empty.")
-    if len(payload) > _MAX_PDF_BYTES:
-        raise HTTPException(status_code=413, detail="PDF exceeds the 15 MB limit.")
-
-    dossier_data = await ingestion_agent.process_pdf_bytes(
-        payload, domain_persona=persona, filename=file.filename
-    )
-
-    return await _persist_new_dossier(
-        dossier_data=dossier_data,
-        req_persona=persona,
-        current_user=current_user,
-        guest_id=guest_id,
-        raw_content=f"Uploaded PDF: {file.filename or 'document.pdf'}",
-        input_type="pdf_text",
-        db=db,
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "code": "LEGACY_DOSSIER_GENERATOR_RETIRED",
+            "message": "PDF ingestion through the deterministic single-shot dossier generator "
+                       "has been removed. Use the evidence-grounded Dossier v2 pipeline instead.",
+            "use": "/api/v1/dossiers/v2/runs",
+        },
     )
 
 

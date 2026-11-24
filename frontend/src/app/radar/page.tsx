@@ -90,7 +90,8 @@ function freshnessLabel(item: any): string | null {
     const deadline = new Date(deadlineValue);
     if (!Number.isNaN(deadline.getTime()) && deadline.getTime() > Date.now()) {
       const label = deadline.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-      return `Closes ${label}`;
+      const basis = String(metadata.deadline_basis || "").trim().toLowerCase();
+      return basis === "event_date" ? `Starts ${label}` : `Closes ${label}`;
     }
   }
   const publishedValue = item?.published_at || metadata.published_at;
@@ -168,6 +169,7 @@ const REGISTRATION_DEADLINE_BASES = [
   "application_close_date",
   "explicit_deadline",
   "registration_deadline_in_search_snippet",
+  "event_date",
 ];
 
 function isRealRadarRecord(opp: Opportunity): boolean {
@@ -200,6 +202,9 @@ export default function RadarPage() {
   const [scanSummary, setScanSummary] = useState<string | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [sourceHealth, setSourceHealth] = useState<any[]>([]);
+  const [conceptProfile, setConceptProfile] = useState<any>(null);
+  const [briefingUnavailable, setBriefingUnavailable] = useState(false);
+  const [briefingReloadKey, setBriefingReloadKey] = useState(0);
 
   useEffect(() => {
     setIdea(initialIdea());
@@ -211,15 +216,18 @@ export default function RadarPage() {
       try {
         const data = await api.getRadarBriefing(persona);
         setBriefing(data);
+        setBriefingUnavailable(false);
       } catch (err) {
-        console.error("Radar briefing error:", err);
-        // Keep the previous briefing instead of replacing it with invented cards.
+        // Radar has no local fallback by design: never invent opportunities.
+        // Keep the previous briefing and surface an honest unavailable state.
+        setBriefingUnavailable(true);
+        console.warn("Radar briefing unavailable:", (err as Error)?.message || err);
       } finally {
         setIsLoading(false);
       }
     }
     loadBriefing();
-  }, [persona]);
+  }, [persona, briefingReloadKey]);
 
   useEffect(() => {
     async function loadMarketSignals() {
@@ -324,13 +332,14 @@ export default function RadarPage() {
       const result = await api.scanLiveRadar({
         raw_idea: rawIdea,
         persona,
-        intents: ["hackathons"],
+        intents: ["hackathons", "events", "grants", "news", "builders"],
         language: "en",
         max_age_hours: 0,
       });
       // Only replace the briefing when the backend returned a real one.
       if (result?.briefing?.all_opportunities) setBriefing(result.briefing);
       if (Array.isArray(result?.sources)) setSourceHealth(result.sources);
+      if (result?.concept_profile) setConceptProfile(result.concept_profile);
       mergeScanSignals(result?.signals);
 
       const stats = result?.stats;
@@ -373,11 +382,32 @@ export default function RadarPage() {
   };
 
   return (
-    <div className="relative min-h-screen bg-void text-white selection:bg-horizon-indigo selection:text-white">
+    <div className="relative min-h-screen bg-void text-white">
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1200px] h-[350px] bg-horizon-radial pointer-events-none -z-10" />
       <Navbar currentPersona={persona} onPersonaChange={setPersona} />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10 space-y-8">
+        {briefingUnavailable && (
+          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+              <div>
+                <p className="text-xs font-semibold text-amber-300">Radar feed unavailable</p>
+                <p className="text-xs text-amber-300/70 mt-1">
+                  The API could not be reached. Start the backend and check{" "}
+                  <code className="font-mono">NEXT_PUBLIC_API_URL</code>, then retry. Existing results are kept — no mock opportunities were added.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setBriefingReloadKey((key) => key + 1)}
+              className="shrink-0 rounded-xl border border-amber-500/40 bg-void px-3 py-1.5 text-xs font-semibold text-amber-300 hover:bg-void-card transition-all"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 mb-2">
@@ -400,7 +430,7 @@ export default function RadarPage() {
                 onClick={() => setPersona(p.id)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
                   persona === p.id
-                    ? "bg-white/10 text-white shadow-xs border border-white/20"
+                    ? "bg-white/10 text-white shadow-xs border border-void-border"
                     : "text-gray-400 hover:text-white"
                 }`}
               >
@@ -427,10 +457,10 @@ export default function RadarPage() {
                 onChange={(event) => setIdea(event.target.value)}
                 rows={3}
                 placeholder="e.g. an offline AI tutor for rural students that works on low-end phones"
-                className="w-full rounded-xl bg-void border border-void-border px-4 py-3 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-horizon-indigo/60 resize-y"
+                className="w-full rounded-xl bg-void border border-void-border px-4 py-3 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-horizon-indigo/60 resize-y"
               />
-              <p className="mt-2 text-[11px] text-gray-500">
-                The Radar retrieves real records first, then ranks them. No deadlines, prizes, or links are invented.
+              <p className="mt-2 text-[11px] text-gray-400">
+                No character limit — paste as much context as you like. The Radar retrieves real records first, then ranks them. No deadlines, prizes, or links are invented.
               </p>
             </div>
             <button
@@ -446,7 +476,7 @@ export default function RadarPage() {
           {(scanSummary || scanError) && (
             <div className="mt-4 flex flex-wrap items-center gap-3">
               {scanSummary && (
-                <span className="text-[11px] font-mono text-emerald-300">{scanSummary}</span>
+                <span className="text-[11px] font-mono text-emerald-700">{scanSummary}</span>
               )}
               {scanError && (
                 <span className="flex items-center gap-1.5 text-[11px] font-mono text-amber-300">
@@ -454,6 +484,32 @@ export default function RadarPage() {
                   {scanError}
                 </span>
               )}
+            </div>
+          )}
+
+          {conceptProfile && (
+            <div className="mt-4 border-t border-void-border/60 pt-4 space-y-2">
+              <p className="text-[10px] font-mono uppercase tracking-widest text-gray-400">
+                Concept normalized by {conceptProfile.source === "groq" ? "Groq" : "local fallback"}
+                {conceptProfile.core_domain ? ` · ${conceptProfile.core_domain}` : ""}
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {(conceptProfile.core_entities || []).slice(0, 8).map((entity: string, idx: number) => (
+                  <span
+                    key={`${entity}-${idx}`}
+                    className="rounded-full border border-horizon-indigo/30 bg-horizon-indigo/10 px-2 py-0.5 text-[10px] font-mono text-horizon-indigo"
+                  >
+                    {entity}
+                  </span>
+                ))}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[10px] font-mono text-gray-400">
+                {Object.entries(conceptProfile.radar_queries || {}).map(([bucket, query]) => (
+                  <p key={bucket}>
+                    <span className="text-horizon-indigo">{bucket}</span>: {String(query)}
+                  </p>
+                ))}
+              </div>
             </div>
           )}
 
@@ -467,7 +523,7 @@ export default function RadarPage() {
                     source.status === "error"
                       ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
                       : source.status === "ok"
-                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700"
                         : "border-void-border bg-void text-gray-400"
                   }`}
                 >
@@ -506,7 +562,7 @@ export default function RadarPage() {
         )}
 
         {strongestPick && isRealRadarRecord(strongestPick) && isUpcomingRegistration(strongestPick) && (
-          <div className="rounded-2xl bg-void-card border border-horizon-indigo/50 p-6 sm:p-8 shadow-2xl relative overflow-hidden">
+          <div className="rounded-2xl bg-void-card border border-horizon-indigo/50 p-6 sm:p-8 shadow-md relative overflow-hidden">
             <div className="absolute top-0 right-0 w-64 h-64 bg-horizon-indigo/10 rounded-full blur-3xl -z-10" />
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-void-border pb-4 mb-5">
               <div className="flex flex-wrap items-center gap-2">
@@ -554,10 +610,10 @@ export default function RadarPage() {
               <div className="border border-void-border rounded-xl bg-void/60 overflow-hidden">
                 <button
                   onClick={() => setIsDrawerOpen(!isDrawerOpen)}
-                  className="w-full flex items-center justify-between p-3.5 text-xs font-semibold text-gray-200 hover:text-white transition-colors"
+                  className="w-full flex items-center justify-between p-3.5 text-xs font-semibold text-white hover:text-white transition-colors"
                 >
                   <span className="flex items-center gap-2 font-mono">
-                    <MessageSquare className="w-4 h-4 text-horizon-violet" />
+                    <MessageSquare className="w-4 h-4 text-horizon-indigo" />
                     Expand Automated Networking Plan & Icebreaker
                   </span>
                   {isDrawerOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -576,7 +632,7 @@ export default function RadarPage() {
                     </div>
                     <div>
                       <span className="font-mono text-gray-400 block mb-1">Custom Pitch Angle:</span>
-                      <p className="text-gray-200">{strongestPick.networking_plan.pitch_angle}</p>
+                      <p className="text-white">{strongestPick.networking_plan.pitch_angle}</p>
                     </div>
                     <div>
                       <span className="font-mono text-gray-400 block mb-1">Pre-Written Icebreaker Message:</span>
@@ -598,11 +654,11 @@ export default function RadarPage() {
                 <TrendingUp className="w-4 h-4" />
               </div>
               <div>
-                <span className="text-xs font-mono uppercase font-bold text-gray-200">
+                <span className="text-xs font-mono uppercase font-bold text-white">
                   Market & Competitor Pulse
                 </span>
                 <p className="text-xs text-gray-400 mt-1 max-w-3xl">{market.summary}</p>
-                <p className="text-[10px] font-mono text-gray-500 mt-1">{market.trend_basis}</p>
+                <p className="text-[10px] font-mono text-gray-400 mt-1">{market.trend_basis}</p>
               </div>
             </div>
             <span className="shrink-0 text-[10px] font-mono uppercase px-2.5 py-1 rounded-full border border-void-border text-gray-400">
@@ -639,7 +695,7 @@ export default function RadarPage() {
             <>
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex items-center gap-1 text-xs">
-                  <Filter className="w-3 h-3 text-gray-500 mr-1" />
+                  <Filter className="w-3 h-3 text-gray-400 mr-1" />
                   {([
                     ["all", "All"],
                     ["hackathon", "Hackathons"],
@@ -660,15 +716,15 @@ export default function RadarPage() {
                 </div>
                 {sourceOptions.length > 1 && (
                   <div className="flex flex-wrap items-center gap-1 text-[11px]">
-                    <span className="font-mono text-gray-500 mr-1">SOURCE</span>
+                    <span className="font-mono text-gray-400 mr-1">SOURCE</span>
                     {[["all", "All"], ...sourceOptions].map(([value, count]: any) => (
                       <button
                         key={value}
                         onClick={() => setSourceFilter(String(value))}
                         className={`px-2 py-1 rounded-md border ${
                           sourceFilter === String(value)
-                            ? "border-horizon-indigo/40 bg-horizon-indigo/10 text-indigo-200"
-                            : "border-void-border text-gray-500 hover:text-gray-300"
+                            ? "border-horizon-indigo/40 bg-horizon-indigo/10 text-horizon-indigo"
+                            : "border-void-border text-gray-400 hover:text-gray-300"
                         }`}
                       >
                         {value} <span className="opacity-60">{count}</span>
@@ -680,9 +736,9 @@ export default function RadarPage() {
 
               {filteredOpps.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-void-border bg-void-card/40 p-8 text-center">
-                  <Compass className="w-6 h-6 text-gray-600 mx-auto mb-2" />
+                  <Compass className="w-6 h-6 text-gray-300 mx-auto mb-2" />
                   <p className="text-sm text-gray-300">No upcoming registrations match this view.</p>
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-gray-400 mt-1">
                     Only opportunities with a future application, submission, or registration deadline are shown. Try a broader idea or clear the filters.
                   </p>
                 </div>
@@ -699,27 +755,27 @@ export default function RadarPage() {
                         <div>
                           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-void-border/60 pb-2 mb-3">
                             <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-horizon-indigo/10 border border-horizon-indigo/30 text-indigo-200">
+                              <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-horizon-indigo/10 border border-horizon-indigo/30 text-horizon-indigo">
                                 {sourceLabel(opp)}
                               </span>
                               <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-void border border-void-border text-gray-400">
                                 {opp.category}
                               </span>
                               {sourceKindLabel(opp) && (
-                                <span className="text-[9px] font-mono text-gray-500">{sourceKindLabel(opp)}</span>
+                                <span className="text-[9px] font-mono text-gray-400">{sourceKindLabel(opp)}</span>
                               )}
                             </div>
                             <div className="flex items-center gap-2">
                               {matchScore > 0 && (
-                                <span className="text-[10px] font-mono text-indigo-300">
+                                <span className="text-[10px] font-mono text-horizon-indigo">
                                   {Math.round(matchScore * 100)}% match
                                 </span>
                               )}
                               {freshnessLabel(opp) && (
-                                <span className="text-[9px] font-mono text-indigo-300">{freshnessLabel(opp)}</span>
+                                <span className="text-[9px] font-mono text-horizon-indigo">{freshnessLabel(opp)}</span>
                               )}
                               {opp.reward_pool && (
-                                <span className="text-xs font-mono font-bold text-emerald-400">
+                                <span className="text-xs font-mono font-bold text-emerald-700">
                                   {opp.reward_pool}
                                 </span>
                               )}
@@ -727,11 +783,16 @@ export default function RadarPage() {
                           </div>
 
                           <h3 className="text-sm font-bold text-white mb-2 leading-snug">{opp.title}</h3>
-                          <p className="text-xs text-gray-400 line-clamp-3 mb-3 leading-relaxed">
+                          <p className="text-xs text-gray-400 line-clamp-3 mb-2 leading-relaxed">
                             {opp.description}
                           </p>
+                          {opp.decision_metadata?.why_this_fits && (
+                            <p className="text-[11px] text-horizon-indigo/85 mb-3 leading-relaxed">
+                              Why this fits: {String(opp.decision_metadata.why_this_fits)}
+                            </p>
+                          )}
 
-                          <div className="flex flex-wrap items-center gap-3 text-[10px] font-mono text-gray-500 mb-3">
+                          <div className="flex flex-wrap items-center gap-3 text-[10px] font-mono text-gray-400 mb-3">
                             <span className="flex items-center gap-1">
                               <MapPin className="w-3 h-3" />
                               {locationLabel(opp)}
@@ -743,7 +804,7 @@ export default function RadarPage() {
                               </span>
                             )}
                             {matchedTerms.length > 0 && (
-                              <span className="text-indigo-300/80">matched: {matchedTerms.slice(0, 3).join(", ")}</span>
+                              <span className="text-horizon-indigo/80">matched: {matchedTerms.slice(0, 3).join(", ")}</span>
                             )}
                           </div>
 
@@ -755,20 +816,20 @@ export default function RadarPage() {
                         </div>
 
                         <div className="pt-3 border-t border-void-border/60 flex items-center justify-between gap-2 text-xs">
-                          <span className="text-[11px] font-mono text-gray-500 truncate">
+                          <span className="text-[11px] font-mono text-gray-400 truncate">
                             Host: {opp.host_organization || "Listed source"}
                           </span>
                           <div className="flex items-center gap-2 shrink-0">
                             <button
                               onClick={() => handleExportICS(opp)}
-                              className="p-1.5 rounded-lg bg-void hover:bg-void-border text-gray-300"
+                              className="p-1.5 rounded-lg bg-void hover:bg-white/20 text-gray-300"
                               title="Download .ics"
                             >
                               <Calendar className="w-3.5 h-3.5" />
                             </button>
                             <button
                               onClick={() => handleTailorPitch(opp)}
-                              className="p-1.5 rounded-lg bg-void hover:bg-void-border text-gray-300"
+                              className="p-1.5 rounded-lg bg-void hover:bg-white/20 text-gray-300"
                               title="Draft a tailored pitch"
                             >
                               <MessageSquare className="w-3.5 h-3.5" />
@@ -777,7 +838,7 @@ export default function RadarPage() {
                               href={opp.canonical_source_url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="flex items-center gap-1 text-horizon-indigo hover:text-indigo-400 font-semibold"
+                              className="flex items-center gap-1 text-horizon-indigo hover:text-horizon-indigo font-semibold"
                             >
                               <span>{opp.category === "hackathon" ? "Apply" : "View source"}</span>
                               <ExternalLink className="w-3.5 h-3.5" />
@@ -794,7 +855,7 @@ export default function RadarPage() {
 
           {feedFilter !== "hackathons" && (
             <div className="space-y-3">
-              <span className="text-[10px] font-mono uppercase text-gray-500">
+              <span className="text-[10px] font-mono uppercase text-gray-400">
                 {isMarketLoading && !visibleSignals.length
                   ? "Scanning platforms…"
                   : `${visibleSignals.length} ${feedFilter === "news" ? "news & launch" : "builder"} signals`}
@@ -803,20 +864,20 @@ export default function RadarPage() {
                 {visibleSignals.map((signal: any) => (
                   <div
                     key={signal.id}
-                    className="rounded-2xl bg-void-card border border-void-border hover:border-horizon-violet/40 p-5 transition-all flex flex-col justify-between"
+                    className="rounded-2xl bg-void-card border border-void-border hover:border-horizon-indigo/40 p-5 transition-all flex flex-col justify-between"
                   >
                     <div>
                       <div className="flex items-center justify-between gap-2 border-b border-void-border/60 pb-2 mb-3">
                         <span className="flex items-center gap-1.5 text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-void border border-void-border text-gray-400">
-                          <Globe2 className="w-3 h-3 text-horizon-violet" />
+                          <Globe2 className="w-3 h-3 text-horizon-indigo" />
                           {signal.source?.replace("_", " ")}
                         </span>
                         <div className="flex flex-col items-end gap-1">
-                          <span className="text-[10px] font-mono text-gray-500">
+                          <span className="text-[10px] font-mono text-gray-400">
                             {Math.round((signal.relevance_score || 0) * 100)}% relevance
                           </span>
                           {freshnessLabel(signal) && (
-                            <span className="text-[9px] font-mono text-indigo-300">{freshnessLabel(signal)}</span>
+                            <span className="text-[9px] font-mono text-horizon-indigo">{freshnessLabel(signal)}</span>
                           )}
                         </div>
                       </div>

@@ -37,6 +37,8 @@ logs/
 # Node & Next.js
 frontend/node_modules/
 frontend/.next/
+frontend/.next-dev/
+frontend/.next-verify/
 frontend/out/
 frontend/tsconfig.tsbuildinfo
 npm-debug.log*

@@ -56,6 +56,18 @@ async function request<T>(
     if (res.status === 204) return undefined as T;
     return await res.json();
   } catch (err: any) {
+    // A bare `TypeError: Failed to fetch` is a browser network failure (backend
+    // offline, CORS rejection, wrong URL, or HTTPS page calling an HTTP API).
+    // Surface an actionable message instead of an opaque stack trace.
+    const isNetworkFailure =
+      err instanceof TypeError ||
+      err?.name === "TypeError" ||
+      err?.name === "AbortError";
+    if (isNetworkFailure) {
+      err = new Error(
+        `Cannot reach the API at ${API_BASE}. Confirm the backend is running and NEXT_PUBLIC_API_URL points to it (network / CORS / mixed content). Original error: ${err.message}`,
+      );
+    }
     if (behavior.noFallback) {
       console.warn(`API call to ${endpoint} failed (${err.message}). No local fallback used.`);
       throw err;
@@ -119,7 +131,7 @@ export const api = {
     persona: string;
     dossier_id?: string;
     dossier_slug?: string;
-    intents?: Array<"hackathons" | "news" | "builders">;
+    intents?: Array<"hackathons" | "news" | "builders" | "events" | "grants" | "trends" | "opportunities">;
     language?: string;
     max_age_hours?: number;
   }) => request<any>(

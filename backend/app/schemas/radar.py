@@ -6,7 +6,9 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from app.core.config import settings
 from app.schemas.signals import MarketSignal
 
-RadarIntent = Literal["hackathons", "news", "builders"]
+RadarIntent = Literal[
+    "hackathons", "news", "builders", "events", "grants", "trends", "opportunities"
+]
 
 class OpportunityBase(BaseModel):
     id: UUID
@@ -89,12 +91,12 @@ class ReprofileResponse(BaseModel):
 
 
 class ScanLiveRequest(BaseModel):
-    raw_idea: Optional[str] = Field(default=None, max_length=20000)
+    raw_idea: Optional[str] = Field(default=None, description="Free-form idea text. No upper length limit.")
     persona: str = settings.DEFAULT_PERSONA
     dossier_id: Optional[UUID] = None
     dossier_slug: Optional[str] = None
     intents: List[RadarIntent] = Field(
-        default_factory=lambda: ["hackathons", "news", "builders"]
+        default_factory=lambda: ["hackathons", "news", "builders", "events", "grants"]
     )
     language: str = settings.RADAR_SCAN_LANGUAGE
     max_age_hours: int = Field(default=0, ge=0, le=720)
@@ -120,7 +122,7 @@ class ScanLiveRequest(BaseModel):
     def limit_intents(cls, value: List[RadarIntent]) -> List[RadarIntent]:
         unique = list(dict.fromkeys(value))
         if not unique:
-            return ["hackathons", "news", "builders"]
+            return ["hackathons", "news", "builders", "events", "grants"]
         return unique[: settings.RADAR_ON_DEMAND_MAX_INTENTS]
 
 
@@ -150,6 +152,8 @@ class ScanLiveStats(BaseModel):
     rejected: int = 0
     opportunities_inserted: int = 0
     opportunities_merged: int = 0
+    relevance_filtered: int = 0
+    llm_verified: int = 0
     duration_ms: int = 0
 
 
@@ -158,6 +162,8 @@ class ScanLiveResponse(BaseModel):
     persona: str
     language: str
     max_age_hours: int
+    concept_profile: Dict[str, Any] = Field(default_factory=dict)
+    radar_queries: Dict[str, str] = Field(default_factory=dict)
     queries: List[RadarQueryPlan] = Field(default_factory=list)
     sources: List[RadarSourceStatus] = Field(default_factory=list)
     stats: ScanLiveStats
