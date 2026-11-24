@@ -30,6 +30,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _security_headers(*, https: bool = False) -> dict[str, str]:
+    """Baseline response headers for every API response, including errors."""
+
+    headers = {
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Referrer-Policy": "no-referrer",
+        "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+        "Cross-Origin-Opener-Policy": "same-origin",
+    }
+    if https:
+        headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return headers
+
+
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """Return a readable 500 that still carries CORS headers.
 
@@ -41,7 +56,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
     logger.exception("Unhandled error on %s %s", request.method, request.url.path)
 
-    headers: dict[str, str] = {}
+    headers: dict[str, str] = _security_headers()
     origin = request.headers.get("origin")
     if origin and origin in settings.cors_origin_list:
         headers["Access-Control-Allow-Origin"] = origin
@@ -149,6 +164,16 @@ app = FastAPI(
     lifespan=lifespan,
     exception_handlers={Exception: unhandled_exception_handler},
 )
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
+    is_https = request.url.scheme == "https" or forwarded_proto == "https"
+    for name, value in _security_headers(https=is_https).items():
+        response.headers.setdefault(name, value)
+    return response
+
 
 # CORS: wildcard origins cannot be combined with credentials in browsers.
 _allow_credentials = "*" not in settings.cors_origin_list
