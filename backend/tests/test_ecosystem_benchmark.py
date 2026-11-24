@@ -53,7 +53,7 @@ def _make_dossier() -> ProjectDossier:
     )
 
 
-def test_exa_payloads_use_two_targeted_queries_and_category(monkeypatch):
+def test_exa_payloads_use_two_targeted_queries_and_highlights(monkeypatch):
     captured = []
 
     class FakeResponse:
@@ -98,9 +98,10 @@ def test_exa_payloads_use_two_targeted_queries_and_category(monkeypatch):
     peer_payload = captured[0]["json"]
     advanced_payload = captured[1]["json"]
     assert "open source student project OR indie prototype" in peer_payload["query"]
-    assert peer_payload["category"] == "github"
+    assert "category" not in peer_payload
+    assert "objective" in peer_payload and peer_payload["objective"].strip()
     assert peer_payload["numResults"] == 5
-    assert peer_payload["contents"]["text"] is True
+    assert peer_payload["contents"] == {"highlights": True}
     assert "production architecture OR research breakthrough scaling" in advanced_payload["query"]
     assert captured[0]["headers"]["x-api-key"] == "exa-test"
 

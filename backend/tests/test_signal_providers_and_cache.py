@@ -32,10 +32,13 @@ class FakeSearchClient:
             "exa": FakeResponse(exa_payload),
         }
         self.calls = []
+        self.exa_kwargs = None
 
     async def post(self, url, **kwargs):
         provider = "tavily" if "tavily" in url else "exa"
         self.calls.append(provider)
+        if provider == "exa":
+            self.exa_kwargs = kwargs
         return self.payloads[provider]
 
     async def aclose(self):
@@ -74,6 +77,13 @@ def test_exa_is_used_when_tavily_returns_no_results(monkeypatch):
 
     assert [item["url"] for item in results] == ["https://example.com/exa"]
     assert fake_client.calls == ["tavily", "exa"]
+
+    payload = fake_client.exa_kwargs["json"]
+    assert payload["type"] == "auto"
+    assert payload["contents"] == {"highlights": True}
+    assert "objective" in payload and payload["objective"].strip()
+    assert "category" not in payload
+    assert "includeDomains" not in payload
 
 
 class FakeGeminiClient:

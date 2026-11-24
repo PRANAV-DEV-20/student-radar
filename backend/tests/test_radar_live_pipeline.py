@@ -178,6 +178,109 @@ def test_signal_search_uses_public_rss_when_tavily_is_unavailable(monkeypatch):
     assert "Why it fits" in result.note or "Google News RSS" in result.note
 
 
+def test_exa_news_search_uses_canonical_request_shape(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "results": [
+                    {
+                        "title": "Edge AI crop screening expands",
+                        "url": "https://news.example.com/edge-crop",
+                        "publishedDate": "2026-11-20T00:00:00.000Z",
+                        "highlights": ["Offline crop disease detection for smallholder farmers."],
+                    }
+                ]
+            }
+
+    class FakeClient:
+        async def post(self, url, **kwargs):
+            captured["url"] = url
+            captured.update(kwargs)
+            return FakeResponse()
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr(settings, "EXA_API_KEY", "exa-test")
+    profile = {
+        "project_title": "offline AI crop disease detector",
+        "core_domain": "crop disease detection",
+        "core_entities": ["offline crop disease detection", "smallholder farmers"],
+    }
+    plan = {"bucket": "news", "options": {"days": 30, "min_score": 0.45}}
+
+    results = asyncio.run(intel_module._exa_search(FakeClient(), plan, profile, 8))
+
+    assert captured["url"] == "https://api.exa.ai/search"
+    payload = captured["json"]
+    assert payload["type"] == "auto"
+    assert payload["contents"] == {"highlights": True}
+    assert "objective" in payload and payload["objective"].strip()
+    assert "startPublishedDate" in payload
+    assert "category" not in payload
+    assert "includeDomains" not in payload
+    assert results[0]["provider"] == "exa"
+    assert "offline crop disease detection" in results[0]["content"].lower()
+
+
+def test_signal_search_prefers_exa_before_rss_when_available(monkeypatch):
+    profile = {
+        "project_title": "offline AI crop disease detector",
+        "core_domain": "crop disease detection",
+        "problem_statement": "detect crop disease offline for smallholder farmers",
+        "target_audience": "smallholder farmers",
+        "core_entities": ["offline crop disease detection", "smallholder farmers"],
+        "tech_stack": ["PyTorch", "edge AI"],
+        "radar_queries": {"news": "crop disease detection PyTorch edge AI launch"},
+    }
+
+    async def fake_tavily(*args, **kwargs):
+        raise RuntimeError("HTTP 432")
+
+    async def fake_exa(client, plan, profile_arg, limit):
+        if plan["bucket"] != "news":
+            return []
+        return [
+            {
+                "title": "Crop disease detection with edge AI",
+                "url": "https://news.example.com/exa",
+                "content": "offline crop disease detection for smallholder farmers",
+                "published_date": "2026-11-20",
+                "score": settings.RADAR_TAVILY_SIGNAL_MIN_SCORE,
+                "provider": "exa",
+            }
+        ]
+
+    async def fake_rss(client, plan, profile_arg, limit):
+        if plan["bucket"] == "news":
+            raise AssertionError("RSS must not be used when Exa returned news")
+        return []
+
+    async def fake_verify(items, profile_arg, language):
+        for item in items:
+            item["why_this_fits"] = "Directly covers crop disease detection for smallholder farmers."
+            item["relevance_score_100"] = 80
+        return items, 0
+
+    monkeypatch.setattr(settings, "TAVILY_API_KEY", "tvly-test")
+    monkeypatch.setattr(settings, "EXA_API_KEY", "exa-test")
+    monkeypatch.setattr(intel_module, "_tavily_search", fake_tavily)
+    monkeypatch.setattr(intel_module, "_exa_search", fake_exa)
+    monkeypatch.setattr(intel_module, "_rss_search", fake_rss)
+    monkeypatch.setattr(intel_module, "_verify_items", fake_verify)
+
+    result = asyncio.run(intel_module.search_concept_intel(profile, language="en"))
+
+    assert [item["provider"] for item in result.items] == ["exa"]
+    assert any(source["source"] == "exa_news" for source in result.sources)
+    assert "Exa search was used for news" in result.note
+
+
 class FakeResult:
     def scalars(self):
         return self

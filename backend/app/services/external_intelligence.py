@@ -148,13 +148,26 @@ class ExternalIntelligenceService:
         if topic:
             tavily_payload["topic"] = topic
 
+        # Exa is a pipeline step, so it gets an objective. Keep the canonical
+        # /search shape: highlights only, no invented category, and no hard
+        # domain filters unless a caller explicitly supplies an allowlist.
+        exa_query = (
+            f"recent news: {query}"
+            if topic == "news" and not query.lower().startswith(("recent", "latest"))
+            else query
+        )
         exa_payload: Dict[str, Any] = {
-            "query": query,
+            "query": exa_query,
+            "type": "auto",
             "numResults": max_results,
-            "contents": {"text": True, "summary": True},
+            "contents": {"highlights": True},
+            "objective": (
+                "Find real, source-backed pages that directly support this student "
+                "radar query. Rank pages with explicit recent facts and dates first; "
+                "exclude unrelated or speculative content; pull concrete titles, URLs, "
+                "publication dates, and short evidence excerpts."
+            ),
         }
-        if include_domains:
-            exa_payload["includeDomains"] = list(include_domains)
 
         async def tavily_search() -> List[Dict[str, Any]]:
             response = await client.post("https://api.tavily.com/search", json=tavily_payload)
@@ -173,7 +186,22 @@ class ExternalIntelligenceService:
             )
             response.raise_for_status()
             payload = response.json()
-            return list(payload.get("results") or [])
+            results = list(payload.get("results") or [])
+            # Exa returns evidence in `highlights`; the rest of this service
+            # reads `content`, so flatten the excerpts without synthesizing text.
+            for raw in results:
+                if not isinstance(raw, dict) or raw.get("content") or raw.get("text") or raw.get("summary"):
+                    continue
+                parts: List[str] = []
+                for highlight in raw.get("highlights") or []:
+                    if isinstance(highlight, str):
+                        parts.append(highlight)
+                    elif isinstance(highlight, dict):
+                        parts.append(str(highlight.get("text") or highlight.get("highlight") or ""))
+                flat = " ".join(" ".join(part.split()) for part in parts if part.strip())
+                if flat:
+                    raw["content"] = flat
+            return results
 
         try:
             providers: Tuple[Tuple[str, Any], ...] = (

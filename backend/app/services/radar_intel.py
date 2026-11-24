@@ -40,6 +40,7 @@ from app.services.concept_normalizer import RADAR_QUERY_KEYS
 logger = logging.getLogger(__name__)
 
 _TAVILY_URL = "https://api.tavily.com/search"
+_EXA_URL = "https://api.exa.ai/search"
 _MONTHS = {
     "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
     "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6, "jul": 7, "july": 7,
@@ -616,6 +617,98 @@ async def _rss_search(
     return results
 
 
+def _exa_query(plan: Dict[str, Any], profile: Dict[str, Any]) -> str:
+    """Natural-language Exa query built only from the user's concept."""
+
+    bucket = str(plan.get("bucket") or "")
+    phrases = _focus_phrases(profile)[:3]
+    subject = (
+        ", ".join(phrases)
+        if phrases
+        else str(profile.get("core_domain") or "the student's concept")
+    )
+    if bucket == "news":
+        return f"Recent news and announcements about {subject}"
+    return f"Recent adoption, market, and research signals about {subject}"
+
+
+def _exa_highlights(raw: Dict[str, Any]) -> str:
+    parts: List[str] = []
+    for highlight in raw.get("highlights") or []:
+        if isinstance(highlight, str):
+            parts.append(highlight)
+        elif isinstance(highlight, dict):
+            parts.append(str(highlight.get("text") or highlight.get("highlight") or ""))
+    return " ".join(" ".join(part.split()) for part in parts if part.strip())
+
+
+async def _exa_search(
+    client: httpx.AsyncClient,
+    plan: Dict[str, Any],
+    profile: Dict[str, Any],
+    limit: int,
+) -> List[Dict[str, Any]]:
+    """Real Exa news/trend links used only when Tavily yields nothing.
+
+    The request follows the canonical /search shape: a semantic query, highlights,
+    an objective for this pipeline step, and the app's explicit day window. Exa
+    does not return a Tavily-comparable score, so the bucket gate is passed through
+    and the strict concept verifier remains the real relevance filter.
+    """
+
+    key = (settings.EXA_API_KEY or "").strip()
+    if not key:
+        return []
+    bucket = str(plan.get("bucket") or "")
+    days = int(plan.get("options", {}).get("days") or settings.RADAR_TREND_DAYS)
+    min_score = float(
+        plan.get("options", {}).get("min_score", settings.RADAR_TAVILY_MIN_SCORE)
+    )
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    payload: Dict[str, Any] = {
+        "query": _exa_query(plan, profile),
+        "type": "auto",
+        "numResults": limit,
+        "contents": {"highlights": True},
+        "startPublishedDate": since.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "objective": (
+            f"Find real, dated pages that directly mention the user's concrete "
+            f"concept and named entities for the {bucket} radar bucket. Rank "
+            "primary announcements and reputable reporting first; exclude generic "
+            "AI/agriculture coverage, undated aggregators, and speculative content; "
+            "pull titles, URLs, publication dates, and short highlights that state "
+            "the concrete fit."
+        ),
+    }
+    response = await client.post(
+        _EXA_URL,
+        headers={"x-api-key": key, "Content-Type": "application/json"},
+        json=payload,
+    )
+    response.raise_for_status()
+    results: List[Dict[str, Any]] = []
+    for raw in (response.json() or {}).get("results") or []:
+        if not isinstance(raw, dict):
+            continue
+        title = " ".join(str(raw.get("title") or "").split())
+        url = str(raw.get("url") or "").strip()
+        if not title or not url.startswith(("http://", "https://")):
+            continue
+        results.append(
+            {
+                "title": title[:250],
+                "url": url,
+                "content": _exa_highlights(raw)[:2400] or title[:250],
+                "published_date": str(
+                    raw.get("publishedDate") or raw.get("published_date") or ""
+                ),
+                "score": min_score,
+                "provider": "exa",
+            }
+        )
+    return results
+
+
 def _parse_date(value: Any) -> Optional[datetime]:
     if not isinstance(value, str) or not value.strip():
         return None
@@ -1084,7 +1177,9 @@ async def search_concept_intel(
     plans = search_plans(profile)
     limit = max(3, settings.RADAR_INTEL_MAX_RESULTS)
     key = (settings.TAVILY_API_KEY or "").strip()
-    fallback_buckets: List[str] = []
+    exa_key = (settings.EXA_API_KEY or "").strip()
+    exa_buckets: List[str] = []
+    rss_buckets: List[str] = []
     outcomes: List[Any]
 
     try:
@@ -1102,33 +1197,55 @@ async def search_concept_intel(
             else:
                 outcomes = [Exception("Tavily API key is not configured") for _ in plans]
 
-            # Tavily free tiers can return HTTP 432 during a burst. News and
-            # trends still have a real public source: Google News RSS links to
-            # dated articles. The same strict concept verification still runs.
+            # Tavily free tiers can return HTTP 432 during a burst. Real dated
+            # news/trends still exist: try Exa first when configured, then the
+            # keyless Google News RSS feed. The strict concept verifier still runs.
             for index, (plan, outcome) in enumerate(zip(plans, outcomes)):
-                if plan["bucket"] not in {"trends", "news"}:
+                bucket = str(plan.get("bucket") or "")
+                if bucket not in {"trends", "news"}:
                     continue
                 if not isinstance(outcome, Exception) and outcome:
                     continue
+                if exa_key:
+                    try:
+                        exa_items = await _exa_search(client, plan, profile, limit)
+                    except Exception as exc:  # noqa: BLE001 - network boundary
+                        logger.warning("Exa fallback failed for %s: %s", bucket, exc)
+                    else:
+                        if exa_items:
+                            outcomes[index] = exa_items
+                            exa_buckets.append(bucket)
+                            continue
                 try:
                     fallback_items = await _rss_search(client, plan, profile, limit)
                 except Exception as exc:  # noqa: BLE001 - network boundary
                     logger.warning(
-                        "Google News RSS fallback failed for %s: %s", plan["bucket"], exc
+                        "Google News RSS fallback failed for %s: %s", bucket, exc
                     )
                     continue
                 if fallback_items:
                     outcomes[index] = fallback_items
-                    fallback_buckets.append(plan["bucket"])
+                    rss_buckets.append(bucket)
     except Exception as exc:  # noqa: BLE001 - network boundary
         result.note = f"Search unavailable: {type(exc).__name__}"
         outcomes = [Exception(result.note) for _ in plans]
 
-    if fallback_buckets:
+    if exa_buckets or rss_buckets:
+        fallbacks: List[str] = []
+        if exa_buckets:
+            fallbacks.append(
+                f"Exa search was used for {', '.join(sorted(set(exa_buckets)))}"
+            )
+        if rss_buckets:
+            fallbacks.append(
+                "Google News RSS was used for "
+                f"{', '.join(sorted(set(rss_buckets)))}"
+            )
         result.note = (
             "Tavily was unavailable for "
-            f"{', '.join(sorted(set(fallback_buckets)))}; "
-            "Google News RSS was used with the same concept verification."
+            f"{', '.join(sorted(set([*exa_buckets, *rss_buckets])))}; "
+            + "; ".join(fallbacks)
+            + " with the same concept verification."
         )
     elif not key:
         result.note = "Tavily API key is not configured; direct platform adapters only."
@@ -1140,6 +1257,8 @@ async def search_concept_intel(
         source_id = f"{provider}_{plan['bucket']}"
         if provider == "google_news_rss":
             label = f"Google News RSS · {plan['bucket'].title()}"
+        elif provider == "exa":
+            label = f"Exa · {plan['bucket'].title()}"
         else:
             label = f"Tavily · {plan['bucket'].title()}"
 
@@ -1195,6 +1314,8 @@ async def search_concept_intel(
                 "note": (
                     "public article links; strict concept verification applied"
                     if provider == "google_news_rss"
+                    else "Exa highlights from dated sources; strict concept verification applied"
+                    if provider == "exa"
                     else "score >= %.2f"
                     % float(
                         plan["options"].get("min_score", settings.RADAR_TAVILY_MIN_SCORE)
@@ -1211,6 +1332,8 @@ async def search_concept_intel(
                 "note": (
                     "Google News RSS fallback; strict concept verification applied"
                     if provider == "google_news_rss"
+                    else "Exa search fallback; strict concept verification applied"
+                    if provider == "exa"
                     else "Enriched with Groq relevance gatekeeper"
                     if groq_client.configured
                     else "Heuristic relevance gate"
@@ -1239,6 +1362,7 @@ async def search_concept_intel(
     for plan in result.plans:
         plan["accepted"] = (
             accepted_by_source.get(f"tavily_{plan['intent']}", 0)
+            + accepted_by_source.get(f"exa_{plan['intent']}", 0)
             + accepted_by_source.get(f"google_news_rss_{plan['intent']}", 0)
         )
     return result

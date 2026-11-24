@@ -53,7 +53,6 @@ class BenchmarkScout:
         query: str,
         *,
         include_domains: Sequence[str],
-        category: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         if not settings.EXA_API_KEY:
             return []
@@ -62,14 +61,22 @@ class BenchmarkScout:
         client = self._client or httpx.AsyncClient(
             timeout=max(2.0, float(settings.EXTERNAL_SIGNAL_TIMEOUT_SECONDS))
         )
+        # This is one step of a larger benchmark pipeline, so it carries an
+        # objective. Highlights are the canonical extraction mode; no invented
+        # category and no stacked text/summary views.
         payload: Dict[str, Any] = {
             "query": query,
+            "type": "auto",
             "numResults": 5,
-            "contents": {"text": True, "summary": True},
+            "contents": {"highlights": True},
             "includeDomains": list(include_domains),
+            "objective": (
+                "Find real, source-backed examples that match the project concept. "
+                "Rank concrete repositories, listings, papers, or production systems "
+                "first; exclude generic explainers and speculative posts; pull titles, "
+                "URLs, and short highlights that show the concrete fit."
+            ),
         }
-        if category:
-            payload["category"] = category
 
         try:
             response = await client.post(
@@ -81,7 +88,20 @@ class BenchmarkScout:
                 json=payload,
             )
             response.raise_for_status()
-            return list(response.json().get("results") or [])
+            results = list(response.json().get("results") or [])
+            for raw in results:
+                if not isinstance(raw, dict) or raw.get("content") or raw.get("text") or raw.get("summary"):
+                    continue
+                parts: List[str] = []
+                for highlight in raw.get("highlights") or []:
+                    if isinstance(highlight, str):
+                        parts.append(highlight)
+                    elif isinstance(highlight, dict):
+                        parts.append(str(highlight.get("text") or highlight.get("highlight") or ""))
+                flat = " ".join(" ".join(part.split()) for part in parts if part.strip())
+                if flat:
+                    raw["content"] = flat
+            return results
         except Exception as exc:  # pragma: no cover - network dependent
             logger.warning("Exa benchmark search failed: %s", exc)
             return []
@@ -181,9 +201,7 @@ class BenchmarkScout:
         query_basis = f"{peer_query} || {advanced_query}"
 
         async def collect_peer() -> List[Dict[str, Any]]:
-            results = await self._search_exa(
-                peer_query, include_domains=PEER_DOMAINS, category="github"
-            )
+            results = await self._search_exa(peer_query, include_domains=PEER_DOMAINS)
             if not results:
                 results = await external_intelligence._search_provider(
                     peer_query, 5, include_domains=PEER_DOMAINS
